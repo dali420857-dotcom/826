@@ -1,0 +1,61 @@
+schema_version: ecc.device-cloud-control.baseline.v1
+project:
+  id: 826-device-cloud-control
+  name: "826 Device and Cloud Control"
+  lifecycle: web-clone-local-fixture-in-progress
+  owner: "project-owner"
+  description: "Local-first control plane for device and cloud capabilities"
+
+profiles:
+  active: safe-default
+  available:
+    - safe-default
+    - rapid-prototype
+  selection_env: DEVICE_CLOUD_PROFILE
+
+architecture:
+  style: "core-services plus adapters behind an explicit control plane"
+  control_plane: "agent-control"
+  application_core: "src/core"
+  adapters: "src/adapters"
+  local_api_default: true
+  default_bind_host: "127.0.0.1"
+
+contracts:
+  capabilities: config/capabilities.yaml
+  fallback_policy: config/fallback-policy.yaml
+  connectors: config/connectors.yaml
+  observability: config/observability.yaml
+  storage: config/storage.yaml
+  knowledge_graph: config/knowledge-graph.yaml
+  skill_registry: config/skill-registry.yaml
+  skill_preflight: scripts/Invoke-SkillPreflight.ps1
+  hermes_agent_preflight: scripts/Invoke-HermesResearchPreflight.ps1
+  hermes_agent_role: .codex/agents/hermes-research-coordinator.toml
+  web_clone_toolchain: config/web-clone-toolchain.yaml
+
+graphs:
+  system_context: graphs/system-context.mmd
+  control_plane: graphs/control-plane.mmd
+  data_flow: graphs/data-flow.mmd
+  state_machine: graphs/state-machine.mmd
+  fallback_decision: graphs/fallback-decision.mmd
+  agent_layers: docs/architecture/agent-layers.md
+  website_inventory: docs/website/konk-cc-public-inventory.md
+
+verification:
+  baseline_script: scripts/Verify-Baseline.ps1
+  knowledge_graph_script: scripts/Update-KnowledgeGraph.ps1
+  acceptance_doc: docs/verification/baseline-acceptance.md
+  hermes_preflight: scripts/Invoke-HermesResearchPreflight.ps1
+  web_clone_acceptance: docs/verification/web-clone-acceptance.md
+  local_mock_contract: docs/website/local-mock-contract.md
+  required_readback: true
+  required_audit_event: true
+
+security:
+  secrets_in_repository: false
+  default_network_scope: loopback
+  default_mutation_scope: disabled
+  redact_sensitive_values: true
+  external_actions_require_approval: true

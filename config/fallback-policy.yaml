@@ -1,0 +1,86 @@
+schema_version: ecc.device-cloud-control.fallback.v1
+default_policy: safe-stop
+global_rules:
+  no_hidden_llm_retry: true
+  no_silent_output_rewrite: true
+  never_retry_non_retryable_error: true
+  mutation_requires_readback: true
+  unknown_error_action: safe-stop
+
+policies:
+  - id: provider-unavailable
+    trigger: "provider health check fails or request cannot establish a connection"
+    primary_action: stop_new_mutations
+    fallback_action: local_read_only_cache
+    retry:
+      max_attempts: 3
+      backoff_ms: [250, 1000, 5000]
+    stop_condition: "cache is stale or an operation would mutate external state"
+    recovery: "restore provider health, revalidate credentials out of band, then replay only idempotent work"
+    audit_event: provider_fallback_entered
+
+  - id: device-unreachable
+    trigger: "device heartbeat or command readback times out"
+    primary_action: stop_follow_up_commands
+    fallback_action: report_only
+    retry:
+      max_attempts: 2
+      backoff_ms: [500, 2000]
+    stop_condition: "no fresh readback after retry budget"
+    recovery: "wait for a fresh heartbeat and require a new correlation id before retrying a mutation"
+    audit_event: device_unreachable
+
+  - id: invalid-input
+    trigger: "schema, range, permission or policy validation fails"
+    primary_action: reject_request
+    fallback_action: deny_and_explain
+    retry:
+      max_attempts: 0
+      backoff_ms: []
+    stop_condition: "request remains invalid after caller correction"
+    recovery: "return field-level validation errors; do not call an external adapter"
+    audit_event: request_rejected
+
+  - id: invalid-data
+    trigger: "readback violates schema, checksum or freshness requirement"
+    primary_action: quarantine_result
+    fallback_action: safe_stop
+    retry:
+      max_attempts: 1
+      backoff_ms: [1000]
+    stop_condition: "second readback is still invalid"
+    recovery: "inspect quarantined payload, compare with last known good snapshot, then repair explicitly"
+    audit_event: invalid_data_quarantined
+
+  - id: policy-denied
+    trigger: "capability policy or approval gate denies the operation"
+    primary_action: reject_request
+    fallback_action: deny_and_explain
+    retry:
+      max_attempts: 0
+      backoff_ms: []
+    stop_condition: "approval is not present"
+    recovery: "obtain explicit approval or choose a read-only capability"
+    audit_event: policy_denied
+
+  - id: mutation-readback-mismatch
+    trigger: "post-mutation state does not match the expected readback"
+    primary_action: freeze_follow_up_mutations
+    fallback_action: create_incident_and_offer_rollback
+    retry:
+      max_attempts: 0
+      backoff_ms: []
+    stop_condition: "state ownership is ambiguous"
+    recovery: "capture evidence, compare snapshot, and require explicit rollback or manual recovery"
+    audit_event: mutation_readback_mismatch
+
+  - id: unknown-error
+    trigger: "unclassified exception, transport corruption or missing evidence"
+    primary_action: safe_stop
+    fallback_action: report_and_escalate
+    retry:
+      max_attempts: 0
+      backoff_ms: []
+    stop_condition: "always; no automatic retry"
+    recovery: "preserve correlation id and artifacts, classify the cause, then perform a new approved action"
+    audit_event: unknown_error_safe_stop

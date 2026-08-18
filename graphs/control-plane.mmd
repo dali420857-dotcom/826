@@ -1,0 +1,38 @@
+flowchart TD
+    TaskStart["Task start"] --> SkillBootstrap["Local read-only skill preflight"]
+    SkillBootstrap --> SkillRegistry["Locked project skill registry"]
+    SkillRegistry --> SkillExposure["Expose all project skills"]
+    SkillExposure --> SkillMatch["Task-matched route selection"]
+    SkillMatch --> HermesRole["Hermes research coordinator\nCodex V2 read-only role"]
+    HermesRole --> HermesPreflight["Hermes contract preflight\nlocal-only"]
+    HermesPreflight -->|contract_only_not_live| HermesWarning["Warning receipt\nno delegation"]
+    HermesPreflight -.->|explicit probe only| HermesAdapter["Optional loopback adapter\n127.0.0.1:8642"]
+    HermesAdapter -.->|read-only + readback| HermesRuntime["Hermes research profiles\nmax 3 / depth 1"]
+    HermesRuntime --> HermesReceipt["Evidence receipt\nprovenance + blockers"]
+    HermesWarning --> HermesReceipt
+    HermesReceipt --> Envelope
+    RouteRegistry["Route registry"] --> Request["Request / route query"]
+    Request --> Normalize["Normalize and validate input"]
+    SkillMatch --> Normalize
+    Normalize --> Registry["Capability registry"]
+    Registry --> Policy["Policy and approval gate"]
+    Policy -->|observation / diagnostics| ReadPath["Read path"]
+    Policy -->|approved mutation| Snapshot["Create snapshot"]
+    Snapshot --> Execute["Execute through core service"]
+    ReadPath --> Core["Core service"]
+    Execute --> Core
+    Core --> Adapter["Narrow adapter"]
+    Adapter --> Readback["Readback and schema validation"]
+    Readback --> Envelope["Typed response envelope"]
+    Envelope --> Audit["Audit event"]
+    Envelope --> Surface["Vue loading / empty / error surface"]
+    Readback -->|invalid or missing| Fallback["Fallback policy"]
+    Fallback --> Envelope
+    ReadPath -->|local-only phase| GenericApi["GET /api/mock/pages/:pageId"]
+    GenericApi --> Fixture["MSW fixture adapter"]
+    Fixture --> Readback
+    Session["Demo role session"] --> Policy
+    Surface --> DryRun["Local dry-run receipt"]
+    DryRun --> Audit
+    Policy -->|denied| Deny["Deny and explain"]
+    Deny --> Audit

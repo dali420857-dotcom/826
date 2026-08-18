@@ -1,0 +1,63 @@
+schema_version: ecc.device-cloud-control.knowledge-graph.v1
+tool:
+  package: graphifyy
+  cli: graphify
+  installed_version: 0.9.44
+  install_scope: user_tool_plus_project_skill
+  project_skill: .codex/skills/graphify/SKILL.md
+  codex_guidance: AGENTS.md
+
+scope:
+  root: .
+  ignore_file: .graphifyignore
+  include:
+    - AGENTS.md
+    - README.md
+    - config
+    - docs
+    - graphs
+    - schemas
+    - scripts
+    - src
+    - tests
+
+extraction:
+  default_mode: code-only
+  semantic_mode: opt-in
+  backend: ollama
+  model: qwen3:4b-no-think
+  token_budget: 3000
+  max_output_tokens: 1024
+  ollama_num_ctx: 8192
+  api_timeout_seconds: 600
+  max_concurrency: 1
+  max_workers: 4
+  local_only: true
+  semantic_api_keys_required: false
+  inferred_edges_must_be_labeled: true
+
+fallback:
+  semantic_failure: code-only
+  preserve_failure_evidence: true
+  semantic_retry_requires: explicit_command
+
+artifacts:
+  output_dir: graphify-out
+  graph_json: graphify-out/graph.json
+  report: graphify-out/GRAPH_REPORT.md
+  html: graphify-out/graph.html
+  memory_dir: graphify-out/memory
+  reflections: graphify-out/reflections/LESSONS.md
+  tracked_in_git: true
+
+refresh:
+  command: "pwsh -NoProfile -File .\\scripts\\Update-KnowledgeGraph.ps1"
+  force_command: "pwsh -NoProfile -File .\\scripts\\Update-KnowledgeGraph.ps1 -Force"
+  git_hook: "graphify hook install"
+  post_commit: enabled
+  post_checkout: enabled
+
+query_examples:
+  - "What are the mutation capabilities and their fallback paths?"
+  - "Path from an agent request to a device readback"
+  - "Which documents explain the safe-stop policy?"

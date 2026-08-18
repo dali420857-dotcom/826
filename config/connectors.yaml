@@ -1,0 +1,24 @@
+schema_version: ecc.device-cloud-control.connectors.v1
+default_state: unconfigured
+rules:
+  - connector_must_have_health_check: true
+  - connector_must_have_readback: true
+  - connector_must_declare_mutations: true
+  - connector_must_redact_secrets: true
+  - connector_must_support_timeout: true
+  - connector_must_declare_retryable_errors: true
+
+connectors:
+  - id: local-device-adapter
+    type: device
+    state: placeholder
+    endpoint: null
+    credentials_source: external_secret_store
+    capabilities: [get_health, inspect_device, validate_data]
+
+  - id: cloud-provider-adapter
+    type: cloud
+    state: placeholder
+    endpoint: null
+    credentials_source: external_secret_store
+    capabilities: [get_health, get_recent_errors, inspect_job, validate_data]

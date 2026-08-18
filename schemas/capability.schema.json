@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ecc.device-cloud-control.capability.v1",
+  "type": "object",
+  "required": [
+    "id",
+    "classification",
+    "mutating",
+    "inputs",
+    "readback",
+    "approval"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]+$" },
+    "classification": {
+      "enum": [
+        "observation",
+        "diagnostics",
+        "ordinary_operation",
+        "administrative_recovery"
+      ]
+    },
+    "mutating": { "type": "boolean" },
+    "inputs": { "type": "array", "items": { "type": "string" } },
+    "dry_run": { "enum": ["supported", "required", "not_applicable"] },
+    "idempotency_key": { "enum": ["required", "optional", "not_applicable"] },
+    "readback": { "const": "required" },
+    "approval": { "enum": ["none", "explicit"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mutating": { "const": true } } },
+      "then": {
+        "required": ["dry_run", "idempotency_key"],
+        "properties": {
+          "idempotency_key": { "const": "required" }
+        }
+      }
+    }
+  ]
+}

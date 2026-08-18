@@ -1,0 +1,295 @@
+schema_version: ecc.device-cloud-control.capabilities.v1
+response_envelope:
+  required_fields: [status, summary, next_actions, artifacts]
+  status_values: [success, warning, error]
+
+classification:
+  observation: "讀取狀態或資源，不產生外部副作用"
+  diagnostics: "檢查健康、錯誤與資料有效性"
+  ordinary_operation: "對已批准的裝置或雲端資源執行變更"
+  administrative_recovery: "快照、回滾、恢復或權限級操作"
+
+skill_routes:
+  exposure: all_project_agents
+  preflight: local_read_only
+  manifest_loading: all_project_metadata
+  activation: automatic_task_match
+  mandatory_task_router: ask-matt
+  mandatory_task_router_activation: every_task
+  mandatory_task_router_order: after_local_preflight_before_other_work
+  mandatory_agent_engineering_router: using-agent-skills
+  mandatory_agent_engineering_router_activation: every_task
+  mandatory_agent_engineering_router_order: after_ask_matt_before_other_work
+  agent_engineering_skill_source: mattpocock/skills
+  agent_engineering_skill_selection: task_matched
+  external_tool_activation: approval_gated
+  mutation_activation: explicit_approval
+  implementation_status: route_only_not_runtime
+  provider_repository_install_requires_explicit_scope: true
+  routes:
+    - id: web-repository-acquisition
+      skill_ids: [source-driven-development, research, security-and-hardening]
+      classification: diagnostics
+      mutating: false
+      external_requests: read_only_until_approved
+      readback: required
+      approval: explicit_for_external_fetch
+      constraints:
+        [source_provenance, license_review, dependency_scan, no_secrets]
+
+    - id: web-security-testing
+      skill_ids:
+        [webapp-testing, browser-testing-with-devtools, security-and-hardening]
+      classification: diagnostics
+      mutating: false
+      readback: required
+      approval: explicit_authorized_target_and_test_window
+      constraints:
+        [
+          owned_or_written_authorization,
+          local_or_staging_default,
+          rate_limit,
+          stop_condition,
+        ]
+
+    - id: cloud-device-control
+      skill_ids:
+        [
+          api-and-interface-design,
+          security-and-hardening,
+          observability-and-instrumentation,
+        ]
+      classification: ordinary_operation
+      mutating: true
+      dry_run: required
+      idempotency_key: required
+      health_check: required
+      readback: required
+      approval: explicit
+      constraints:
+        [owned_or_authorized_devices, least_privilege, audit, kill_switch]
+
+    - id: cloud-phone-virtualization
+      skill_ids:
+        [
+          api-and-interface-design,
+          performance-optimization,
+          observability-and-instrumentation,
+        ]
+      classification: ordinary_operation
+      mutating: true
+      dry_run: required
+      idempotency_key: required
+      health_check: required
+      readback: required
+      approval: explicit
+      constraints:
+        [
+          authorized_infrastructure,
+          quota_isolation,
+          loopback_or_authenticated_remote_access,
+        ]
+
+    - id: telegram-control
+      skill_ids:
+        [
+          api-and-interface-design,
+          security-and-hardening,
+          observability-and-instrumentation,
+        ]
+      classification: ordinary_operation
+      mutating: true
+      dry_run: required
+      idempotency_key: required
+      readback: required
+      approval: explicit_account_chat_scope_and_compliance_review
+      constraints:
+        [
+          approved_accounts_and_chats,
+          provider_rate_limits,
+          delivery_readback,
+          no_credential_theft,
+        ]
+
+agent_routes:
+  exposure: all_project_agents
+  preflight: local_read_only
+  activation: automatic_task_match
+  implementation_status: registered_contract_only
+  routes:
+    - id: hermes-research-coordinator
+      role: hermes_research_coordinator
+      classification: diagnostics
+      mutating: false
+      dry_run: supported
+      readback: required
+      approval: explicit_for_loopback_probe_or_external_read_only_research
+      adapter_status: contract_only_not_live
+      adapter_preflight: scripts/Invoke-HermesResearchPreflight.ps1
+      endpoint: loopback_only
+      max_parallel_children: 3
+      max_depth: 1
+      constraints:
+        [
+          no_arbitrary_shell,
+          no_credentials,
+          no_external_mutations,
+          no_hidden_retries,
+          preserve_provenance,
+        ]
+      stop_conditions:
+        [
+          missing_adapter,
+          missing_authorization,
+          missing_readback,
+          unauthorized_scope,
+        ]
+
+capabilities:
+  - id: get_health
+    classification: observation
+    mutating: false
+    inputs: [resource_scope]
+    readback: required
+    approval: none
+
+  - id: get_recent_errors
+    classification: diagnostics
+    mutating: false
+    inputs: [resource_scope, time_window]
+    readback: required
+    approval: none
+
+  - id: inspect_device
+    classification: observation
+    mutating: false
+    inputs: [device_id]
+    readback: required
+    approval: none
+
+  - id: inspect_job
+    classification: observation
+    mutating: false
+    inputs: [job_id]
+    readback: required
+    approval: none
+
+  - id: validate_data
+    classification: diagnostics
+    mutating: false
+    inputs: [resource_scope, validation_profile]
+    readback: required
+    approval: none
+
+  - id: inspect_fraud_overview
+    classification: observation
+    mutating: false
+    inputs: [resource_scope, scenario]
+    readback: required
+    approval: none
+
+  - id: inspect_frontend_page
+    classification: observation
+    mutating: false
+    inputs: [page_id, resource_scope, scenario]
+    readback: required
+    approval: none
+
+  - id: inspect_mock_page
+    classification: observation
+    mutating: false
+    inputs: [page_id, scenario]
+    readback: required
+    approval: none
+
+  - id: inspect_offline_product_surface
+    classification: observation
+    mutating: false
+    inputs: [surface, path]
+    readback: required
+    approval: none
+
+  - id: create_local_draft
+    classification: diagnostics
+    mutating: false
+    inputs: [surface, draft_type, name]
+    dry_run: required
+    readback: local-simulation
+    approval: none
+    guarantees:
+      external_requests: false
+      mutation_applied: false
+
+  - id: preview_local_operation
+    classification: diagnostics
+    mutating: false
+    inputs: [capability, resource_scope, payload]
+    readback: required
+    approval: none
+
+  - id: local_dry_run
+    classification: diagnostics
+    mutating: false
+    inputs: [page_id, action_id, scenario, role]
+    dry_run: required
+    idempotency_key: not_applicable
+    readback: local-simulation
+    approval: none
+    guarantees:
+      dry_run: true
+      mutation_applied: false
+      external_requests: false
+      route_allowlist: required
+      action_allowlist: required
+      role_scope: required
+
+  - id: coordinate_hermes_research
+    classification: diagnostics
+    mutating: false
+    inputs: [objective, scope, evidence_requirements, authorization]
+    dry_run: supported
+    readback: required
+    approval: explicit_for_read_only_external_research
+    adapter_status: contract_only_not_live
+    max_parallel_children: 3
+    max_depth: 1
+    guarantees:
+      mutation_applied: false
+      external_mutations: false
+      credentials_accessed: false
+      fixed_response_envelope: required
+      provenance: required
+
+  - id: run_smoke_tests
+    classification: diagnostics
+    mutating: false
+    inputs: [test_scope]
+    readback: required
+    approval: none
+
+  - id: create_snapshot
+    classification: administrative_recovery
+    mutating: true
+    inputs: [resource_scope, reason]
+    dry_run: supported
+    idempotency_key: required
+    readback: required
+    approval: explicit
+
+  - id: execute_device_operation
+    classification: ordinary_operation
+    mutating: true
+    inputs: [device_id, operation, parameters, idempotency_key]
+    dry_run: required
+    idempotency_key: required
+    readback: required
+    approval: explicit
+
+  - id: rollback_snapshot
+    classification: administrative_recovery
+    mutating: true
+    inputs: [snapshot_id, reason, idempotency_key]
+    dry_run: supported
+    idempotency_key: required
+    readback: required
+    approval: explicit

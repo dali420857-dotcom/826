@@ -1,0 +1,40 @@
+export { createTelegramBackend } from './backend';
+export type {
+  FakeTelegramAdapter,
+  FakeTelegramAdapterRequest,
+  TelegramAuditEvent,
+  TelegramBackend,
+  TelegramBridgeRegistration,
+  TelegramEnqueueRequest,
+} from './backend';
+export {
+  telegramApprovalBindingSchema,
+  telegramApprovalResultSchema,
+  telegramApprovePayloadSchema,
+  telegramCreateMessagePayloadSchema,
+  telegramEnqueuePayloadSchema,
+  telegramFakeAdapterResultSchema,
+  telegramPreviewImportPayloadSchema,
+  telegramPreviewResultSchema,
+  telegramQueueResultSchema,
+  telegramReconcilePayloadSchema,
+  telegramReviseMessagePayloadSchema,
+  telegramSessionEvidenceSchema,
+  telegramSnapshotSchema,
+  telegramTargetPreviewResultSchema,
+} from './schemas';
+export type {
+  TelegramApprovalBinding,
+  TelegramApprovalResult,
+  TelegramApprovePayload,
+  TelegramCreateMessagePayload,
+  TelegramEnqueuePayload,
+  TelegramPreviewImportPayload,
+  TelegramPreviewResult,
+  TelegramQueueResult,
+  TelegramReconcilePayload,
+  TelegramReviseMessagePayload,
+  TelegramSessionEvidence,
+  TelegramSnapshot,
+  TelegramTargetPreviewResult,
+} from './schemas';

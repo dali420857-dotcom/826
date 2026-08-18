@@ -1,0 +1,18 @@
+schema_version: ecc.device-cloud-control.storage.v1
+state:
+  root: runtime/state
+  mode: local_only
+  encryption: external_runtime_configuration
+  ttl_hours: 24
+
+cache:
+  root: runtime/cache
+  mode: read_only_fallback
+  max_age_seconds: 300
+  stale_cache_may_mutate: false
+
+snapshots:
+  root: runtime/snapshots
+  required_before_mutation: true
+  retain_last: 5
+  restore_requires_explicit_approval: true

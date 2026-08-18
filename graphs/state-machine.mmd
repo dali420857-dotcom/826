@@ -1,0 +1,29 @@
+stateDiagram-v2
+    [*] --> Unconfigured
+    Unconfigured --> HealthChecking: connector configured
+    HealthChecking --> ReadyReadOnly: health passes
+    ReadyReadOnly --> FixtureLoading: local route opened via route registry
+    FixtureLoading --> ReadyReadOnly: fresh fixture readback
+    FixtureLoading --> Empty: valid empty response
+    FixtureLoading --> PermissionDenied: policy response 403
+    FixtureLoading --> TimedOut: no readback in budget
+    FixtureLoading --> Degraded: provider error
+    ReadyReadOnly --> DryRunPreview: local dry-run action requested
+    DryRunPreview --> ReadyReadOnly: mutation_applied=false
+    Empty --> ReadyReadOnly: scenario changed
+    PermissionDenied --> ReadyReadOnly: scope changed
+    TimedOut --> ReadyReadOnly: retry with new request
+    HealthChecking --> Degraded: transient failure
+    Degraded --> ReadyReadOnly: fresh health readback
+    ReadyReadOnly --> MutationPending: approved mutation request
+    MutationPending --> Snapshotting: idempotency validated
+    Snapshotting --> Executing: snapshot confirmed
+    Executing --> ReadbackPending: adapter returned
+    ReadbackPending --> ReadyReadOnly: readback matches
+    ReadbackPending --> Quarantined: invalid or stale readback
+    Quarantined --> ManualRecovery: evidence preserved
+    ManualRecovery --> HealthChecking: explicit recovery completed
+    Executing --> Degraded: timeout or provider failure
+    Degraded --> SafeStopped: retry budget exhausted
+    Quarantined --> SafeStopped: ownership ambiguous
+    SafeStopped --> HealthChecking: explicit restart and revalidation

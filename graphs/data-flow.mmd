@@ -1,0 +1,54 @@
+flowchart LR
+    subgraph Input["Input boundary"]
+        UserInput["User / agent request"]
+        TaskStart["Task start"]
+        SkillBootstrap["Local read-only skill preflight"]
+        SkillRegistry["Project skill registry"]
+        SkillRoute["Task-matched skill route"]
+        HermesRole["Hermes research coordinator"]
+        HermesPreflight["Hermes contract preflight"]
+        HermesAdapter["Optional loopback adapter"]
+        HermesEvidence["Evidence receipt"]
+        RequestSchema["Request schema"]
+        UserInput --> RequestSchema
+        TaskStart --> SkillBootstrap --> SkillRegistry
+        SkillRegistry --> SkillRoute --> RequestSchema
+        SkillRoute --> HermesRole --> HermesPreflight
+        HermesPreflight --> HermesEvidence
+        HermesPreflight -.->|explicit probe only| HermesAdapter -.->|read-only + readback| HermesEvidence
+        RouteRegistry["Route registry"]
+        RouteQuery["Route scenario query"] --> RequestSchema
+        RouteRegistry --> RouteQuery
+        DemoSession["Local demo session"] --> RequestSchema
+    end
+
+    subgraph Decision["Decision boundary"]
+        Capability["Capability lookup"]
+        Permission["Permission and approval"]
+        Idempotency["Idempotency key"]
+        RequestSchema --> Capability --> Permission --> Idempotency
+    end
+
+    subgraph Execution["Execution boundary"]
+        Core["Core service"]
+        Adapter["Adapter"]
+        External["Device / cloud (future; disabled)"]
+        Fixture["MSW local fixture"]
+        GenericPageApi["GET /api/mock/pages/:pageId"]
+        DryRun["Local dry-run function"]
+        Idempotency --> Core --> Adapter --> External
+        Core --> GenericPageApi --> Fixture
+        Core --> DryRun
+    end
+
+    subgraph Evidence["Evidence boundary"]
+        Readback["Fresh readback"]
+        Validate["Schema / freshness validation"]
+        Audit["Audit record"]
+        External --> Readback
+        Fixture --> Readback
+        Readback --> Validate --> Audit
+    end
+
+    Validate -->|failure| Fallback["Fallback and safe stop"]
+    Fallback --> Audit

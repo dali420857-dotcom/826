@@ -1,0 +1,111 @@
+schema_version: ecc.device-cloud-control.web-clone-toolchain.v1
+
+purpose: "Local-first, clean-room reconstruction of a public Vue SPA surface"
+status: local_fixture_phase_in_progress
+target:
+  public_origin: http://konk.cc
+  public_app_path: /tgcloud_pc/
+  copy_mode: clean_room_behavioral_reimplementation
+  exact_assets_or_code: prohibited_until_ownership_or_license_confirmed
+  live_mutations: disabled
+  credential_or_session_replay: prohibited
+  payment_or_bulk_messaging: prohibited
+
+runtime:
+  node: ">=22"
+  bind_host: 127.0.0.1
+  default_frontend_port: 5173
+  default_preview_port: 4173
+
+frontend:
+  framework: vue
+  router: vue-router
+  state: pinia
+  component_library: element-plus
+  http_client: axios
+  validation: zod
+  dev_server: vite
+
+implemented_surface:
+  route_shell: true
+  primary_route: /preventing_fraud
+  mock_contract: /api/preventing-fraud/overview
+  external_requests: disabled
+
+verification:
+  unit: vitest
+  component: "@testing-library/vue"
+  browser: "@playwright/test"
+  browser_scope: local_or_explicitly_authorized_staging_only
+  traces_on_failure: true
+  dependency_audit: "npm audit --omit=dev"
+  project_check: "npm run toolchain:check"
+
+mocking:
+  api: msw
+  default_data: local_fixtures_only
+  same_origin_api: true
+  real_target_write_requests: false
+
+web_acquisition:
+  provider: firecrawl
+  sdk_package: firecrawl
+  cli_package: npx_firecrawl-cli_on_demand
+  mcp_endpoint: https://mcp.firecrawl.dev/v2/mcp
+  source_repository: https://github.com/firecrawl/firecrawl
+  mcp_repository: https://github.com/firecrawl/firecrawl-mcp-server
+  default_auth: keyless_rate_limited
+  full_surface_auth: FIRECRAWL_API_KEY_from_environment_only
+  allowed_operations: [search, scrape, parse]
+  key_gated_operations: [crawl, map, extract, agent, interact]
+  robots_and_terms: required
+  response_cache: project-local_and_redacted
+  target_write_requests: false
+  local_cli_install: deferred_until_upstream_audit_passes
+
+agent_routes:
+  inventory: explorer
+  source_and_license_review: docs-researcher
+  implementation: worker
+  security_and_dependency_review: reviewer
+  browser_acceptance: browser-qa
+  integration_owner: primary-agent
+
+external_sources:
+  - id: vue
+    repository: https://github.com/vuejs/core
+    use: frontend_runtime
+  - id: vite
+    repository: https://github.com/vitejs/vite
+    use: dev_server_and_build
+  - id: element-plus
+    repository: https://github.com/element-plus/element-plus
+    use: local_component_library
+  - id: playwright
+    repository: https://github.com/microsoft/playwright
+    use: authorized_browser_verification
+  - id: vitest
+    repository: https://github.com/vitest-dev/vitest
+    use: unit_and_component_tests
+  - id: msw
+    repository: https://github.com/mswjs/msw
+    use: local_api_fixtures
+  - id: firecrawl
+    repository: https://github.com/firecrawl/firecrawl
+    use: public_page_discovery_and_scrape
+  - id: firecrawl-mcp-server
+    repository: https://github.com/firecrawl/firecrawl-mcp-server
+    use: Codex_MCP_web_context
+
+not_installed_by_default:
+  - web_security_testing_and_fuzzing
+  - android_cloud_device_farms
+  - cloud_phone_virtualization
+  - telegram_mtproto_or_userbot_clients
+  - proxy_pools
+  - payment_connectors
+
+install_gate:
+  required_before_target_replication: true
+  required_before_live_integration: ownership_or_written_authorization
+  required_before_external_mutation: explicit_user_approval_and_readback_plan

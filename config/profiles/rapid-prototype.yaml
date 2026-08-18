@@ -1,0 +1,47 @@
+schema_version: ecc.device-cloud-control.profile.v1
+profile: rapid-prototype
+mode: isolated-development
+description: "只供隔離開發環境使用的快速整合設定；不代表可直接用於生產"
+
+network:
+  bind_host: 127.0.0.1
+  allow_remote: false
+  remote_override_env: DEVICE_CLOUD_ALLOW_REMOTE
+  require_short_lived_auth: true
+  outbound_network: enabled_only_with_explicit_connector
+
+permissions:
+  observation: enabled
+  diagnostics: enabled
+  ordinary_operations: enabled_with_confirmation
+  administrative_recovery: disabled
+  external_publish: disabled
+
+execution:
+  dry_run_default: false
+  require_idempotency_key_for_mutation: true
+  require_readback_for_mutation: true
+  require_snapshot_before_mutation: true
+  max_concurrent_operations: 2
+  operation_timeout_seconds: 60
+
+retry:
+  max_attempts: 2
+  backoff_ms: [250, 1000]
+  retryable_errors: [timeout, transient_network, rate_limited]
+  never_retry_errors:
+    [unauthorized, forbidden, invalid_input, policy_denied, unknown]
+
+fallback:
+  provider_unavailable: alternate_approved_provider_then_read_only_cache
+  device_unreachable: queued_operation_then_report
+  invalid_data: quarantine_and_stop
+  policy_denied: deny_and_explain
+  unknown_error: safe_stop
+
+guardrails:
+  allowed_environment: development_only
+  require_synthetic_data: true
+  require_kill_switch: true
+  require_audit_events: true
+  never_store_credentials: true

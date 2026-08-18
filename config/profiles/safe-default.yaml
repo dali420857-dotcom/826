@@ -1,0 +1,45 @@
+schema_version: ecc.device-cloud-control.profile.v1
+profile: safe-default
+mode: safe
+description: "本機優先、唯讀優先、可停止與可回滾的初始化設定"
+
+network:
+  bind_host: 127.0.0.1
+  allow_remote: false
+  require_short_lived_auth: true
+  outbound_network: disabled_until_connector_approved
+
+permissions:
+  observation: enabled
+  diagnostics: enabled
+  ordinary_operations: disabled
+  administrative_recovery: disabled
+  external_publish: disabled
+
+execution:
+  dry_run_default: true
+  require_idempotency_key_for_mutation: true
+  require_readback_for_mutation: true
+  require_snapshot_before_mutation: true
+  max_concurrent_operations: 1
+  operation_timeout_seconds: 30
+
+retry:
+  max_attempts: 3
+  backoff_ms: [250, 1000, 5000]
+  retryable_errors: [timeout, transient_network, rate_limited]
+  never_retry_errors:
+    [unauthorized, forbidden, invalid_input, policy_denied, unknown]
+
+fallback:
+  provider_unavailable: local_read_only_cache
+  device_unreachable: report_only
+  invalid_data: quarantine_and_stop
+  policy_denied: deny_and_explain
+  unknown_error: safe_stop
+
+observability:
+  audit_events: required
+  redact_secrets: true
+  persist_raw_payloads: false
+  include_correlation_id: true

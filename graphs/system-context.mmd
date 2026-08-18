@@ -1,0 +1,56 @@
+flowchart LR
+    Operator["Operator"]
+    Agent["Agent / Client"]
+    Bootstrap["Local Skill Preflight"]
+    SkillRegistry["Locked Skill Registry"]
+    SkillRoutes["Task-matched Skill Routes"]
+    HermesRole["Hermes Research Coordinator\nCodex V2 read-only"]
+    HermesPreflight["Hermes Contract Preflight"]
+    HermesAdapter["Optional Loopback Adapter\ncontract-only by default"]
+    HermesRuntime["Hermes Research Profiles"]
+    HermesReceipt["Evidence Receipt\nprovenance + readback"]
+    Control["Agent Control Plane"]
+    Core["Application Core Services"]
+    DeviceAdapter["Device Adapters"]
+    CloudAdapter["Cloud Adapters"]
+    Device["Physical Devices"]
+    Cloud["Cloud Services"]
+    State["Local State / Cache"]
+    Snapshot["Snapshots"]
+    Audit["Audit / Metrics"]
+    VueShell["Vue Route Shell"]
+    Mock["MSW Local Fixtures"]
+    Session["Local Demo Session"]
+    DryRun["Local Dry-run Receipt"]
+
+    Operator --> Agent
+    Agent -->|task start| Bootstrap
+    Bootstrap -->|local-only index| SkillRegistry
+    Agent -->|discover project skills| SkillRegistry
+    SkillRegistry --> SkillRoutes
+    SkillRoutes -->|route constraints| Control
+    SkillRoutes --> HermesRole
+    HermesRole --> HermesPreflight
+    HermesPreflight -.->|explicit probe| HermesAdapter
+    HermesAdapter -.->|bounded read-only delegation| HermesRuntime
+    HermesPreflight --> HermesReceipt
+    HermesRuntime --> HermesReceipt
+    HermesReceipt --> Control
+    Operator --> VueShell
+    VueShell -->|typed observation capability| Control
+    Agent -->|typed capability request| Control
+    Control -->|validated command| Core
+    Core --> DeviceAdapter
+    Core --> CloudAdapter
+    DeviceAdapter --> Device
+    CloudAdapter --> Cloud
+    Core --> State
+    Core --> Snapshot
+    Control --> Audit
+    Core --> Audit
+    State -.->|read-only fallback| Control
+    VueShell --> Mock
+    Mock -->|fixture readback| VueShell
+    VueShell --> Session
+    VueShell --> DryRun
+    DryRun --> Audit

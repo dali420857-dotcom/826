@@ -1,0 +1,43 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime state and local artifacts
+runtime/state/
+runtime/cache/
+runtime/logs/
+artifacts/authorized-mirror/
+artifacts/product-preview/
+*.log
+*.sqlite
+*.db
+*.bak
+
+# Common tooling output
+node_modules/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+dist/
+build/
+coverage/
+.codegraph/
+playwright-report/
+test-results/
+
+# Graphify generated caches and machine-local metadata; canonical graph views
+# below remain versioned.
+graphify-out/cache/
+graphify-out/.graphify_root
+graphify-out/.graphify_analysis.json
+graphify-out/manifest.json
+graphify-out/memory/
+graphify-out/reflections/
+.DS_Store
+Thumbs.db

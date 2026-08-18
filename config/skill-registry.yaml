@@ -1,0 +1,292 @@
+schema_version: ecc.device-cloud-control.skill-registry.v1
+
+policy:
+  install_mode: explicit
+  optional_categories_default: exposed_via_installed_skills
+  project_skill_scope: .agents/skills
+  agent_exposure: all_project_agents
+  agent_visibility: project_discoverable
+  automatic_task_bootstrap: local_read_only
+  bootstrap_command: "pwsh -NoProfile -File .\\scripts\\Invoke-SkillPreflight.ps1"
+  skill_manifest_loading: all_project_metadata
+  activation_mode: automatic_task_matching
+  mandatory_task_router: ask-matt
+  mandatory_task_router_activation: every_task
+  mandatory_task_router_order: after_local_preflight_before_other_work
+  mandatory_agent_engineering_router: using-agent-skills
+  mandatory_agent_engineering_router_activation: every_task
+  mandatory_agent_engineering_router_order: after_ask_matt_before_other_work
+  agent_engineering_skill_source: mattpocock/skills
+  agent_engineering_skill_selection: task_matched
+  external_tool_activation: approval_gated
+  mutation_activation: explicit_approval
+  route_exposure: capability_route_only
+  provider_repository_install_requires_explicit_scope: true
+  lockfile: skills-lock.json
+  third_party_skills_require_review: true
+  no_credentials_in_skill_files: true
+  external_actions_require_approval: true
+  high_risk_targets_require_authorization: true
+  skill_updates_require_verification: true
+
+installed_tools:
+  - id: graphify
+    repository: https://github.com/safishamsi/graphify
+    canonical_repository: https://github.com/Graphify-Labs/graphify
+    package: graphifyy
+    installed_version: 0.9.44
+    install_scope: user-tool-plus-project-skill
+    status: installed
+    activation: automatic_local_preflight
+    semantic_activation: explicit_only
+    project_skill: .codex/skills/graphify/SKILL.md
+    artifacts: graphify-out/graph.json, graphify-out/GRAPH_REPORT.md, graphify-out/graph.html
+  - id: firecrawl
+    repository: https://github.com/firecrawl/firecrawl
+    mcp_repository: https://github.com/firecrawl/firecrawl-mcp-server
+    package: firecrawl
+    installed_version: 4.32.2
+    install_scope: project-sdk-plus-global-and-project-mcp
+    status: installed
+    activation: explicit_public_web_acquisition
+    auth: keyless_rate_limited_or_environment_only
+    allowed_operations:
+      - search
+      - scrape
+      - parse
+    key_gated_operations:
+      - crawl
+      - map
+      - extract
+      - agent
+      - interact
+    constraints:
+      - respect_robots_and_terms
+      - no_login_or_credential_replay
+      - no_external_write_requests
+      - redact_cached_responses
+    notes: Local firecrawl-cli is deferred until its dependency audit is clean; use the Codex MCP or an on-demand audited CLI.
+
+agent_integrations:
+  - id: hermes-research-coordinator
+    kind: codex_v2_custom_agent_with_optional_loopback_adapter
+    status: registered_contract_only
+    implementation_status: registered_contract_only
+    exposure: all_project_agents
+    activation: automatic_task_match
+    codex_role: hermes_research_coordinator
+    role_config: .codex/agents/hermes-research-coordinator.toml
+    preflight: scripts/Invoke-HermesResearchPreflight.ps1
+    adapter_status: contract_only_not_live
+    runtime_endpoint: loopback_only
+    runtime_endpoint_default: 127.0.0.1:8642
+    a2a_enabled_by_default: false
+    max_parallel_children: 3
+    max_depth: 1
+    network_requests: false
+    external_mutations: false
+    credentials_in_repository: false
+    approval: explicit_for_loopback_probe_or_external_read_only_research
+    readback: required
+    notes: This role coordinates evidence and bounded research; it does not prove that a live Hermes runtime or task-delegation API is connected.
+
+installed:
+  - id: addy-agent-skills
+    repository: https://github.com/addyosmani/agent-skills
+    install_scope: project-codex
+    path: .agents/skills
+    installed_skill_count: 24
+    status: installed
+    exposure: all_project_agents
+    activation: automatic_task_match
+    focus:
+      - source-driven-development
+      - spec-driven-development
+      - test-driven-development
+      - security-and-hardening
+      - browser-testing-with-devtools
+      - observability-and-instrumentation
+  - id: headroom
+    repository: https://github.com/chopratejas/headroom
+    canonical_repository: https://github.com/headroomlabs-ai/headroom
+    package: headroom-ai[all]
+    install_scope: user-uv-tool
+    installed_version: 0.35.0
+    status: installed
+    activation: opt-in
+    auto_wrap_codex: false
+    auto_start_proxy: false
+    proxy_default: loopback-only
+    focus:
+      - context-compression
+      - local-first-proxy
+      - reversible-routing
+    notes: Keep the proxy stopped until a task explicitly needs context routing; run headroom doctor before use.
+  - id: mattpocock-skills
+    repository: https://github.com/mattpocock/skills
+    install_scope: project-codex
+    path: .agents/skills
+    installed_skill_count: 35
+    status: installed
+    exposure: all_project_agents
+    activation: mandatory_task_route
+    route: using-agent-skills
+    route_order: after_ask_matt_before_other_work
+    focus:
+      - engineering-workflows
+      - debugging
+      - tdd
+      - architecture
+      - research
+    notes: setup-matt-pocock-skills is installed but not auto-run because it asks for project-specific tracker and documentation choices.
+  - id: anthropic-skills
+    repository: https://github.com/anthropics/skills
+    install_scope: project-codex
+    path: .agents/skills
+    installed_skill_count: 18
+    status: installed
+    exposure: all_project_agents
+    activation: automatic_task_match
+    focus:
+      - webapp-testing
+      - mcp-builder
+      - skill-creator
+      - document-and-media-workflows
+    notes: Source-available examples/spec/template; review each skill before critical use and keep project tests authoritative.
+
+optional_catalog:
+  - id: web-repository-acquisition
+    status: exposed_via_installed_skills
+    exposure: all_project_agents
+    activation: automatic_task_match
+    implementation_status: route_only_not_runtime
+    repository_status: not_selected
+    skill_ids:
+      - source-driven-development
+      - research
+      - security-and-hardening
+    categories:
+      - web-copy
+      - web-scraping
+      - repository-cloning
+      - dependency-intake
+    install_trigger: explicit_task_plus_source_license_security_review
+    constraints:
+      - respect robots_and_terms
+      - preserve_source_provenance
+      - scan_dependencies_before_execution
+      - do_not_copy_secrets_or_personal_data
+    preferred_skill_ids:
+      - source-driven-development
+      - research
+      - security-and-hardening
+  - id: web-security-testing
+    status: exposed_via_installed_skills
+    exposure: all_project_agents
+    activation: automatic_task_match
+    implementation_status: route_only_not_runtime
+    repository_status: not_selected
+    skill_ids:
+      - webapp-testing
+      - browser-testing-with-devtools
+      - security-and-hardening
+    categories:
+      - web-application-security-testing
+      - penetration-testing
+      - browser-testing
+      - fuzzing
+    install_trigger: explicit_authorized_target_and_test_window
+    constraints:
+      - owned_or_written_authorization_only
+      - local_or_staging_default
+      - no_credential_abuse
+      - rate_limit_and_stop_conditions_required
+      - findings_must_be_redacted_and_audited
+    preferred_skill_ids:
+      - webapp-testing
+      - browser-testing-with-devtools
+      - security-and-hardening
+  - id: cloud-device-control
+    status: exposed_via_installed_skills
+    exposure: all_project_agents
+    activation: automatic_task_match
+    implementation_status: route_only_not_runtime
+    repository_status: not_selected
+    skill_ids:
+      - api-and-interface-design
+      - security-and-hardening
+      - observability-and-instrumentation
+    categories:
+      - cloud-control
+      - android-device-farm
+      - mobile-orchestration
+      - adb
+    install_trigger: explicit_device_scope_and_provider_selection
+    constraints:
+      - owned_or_authorized_devices_only
+      - least_privilege_credentials
+      - health_check_before_mutation
+      - readback_and_audit_required
+      - kill_switch_required
+    preferred_skill_ids:
+      - api-and-interface-design
+      - security-and-hardening
+      - observability-and-instrumentation
+  - id: cloud-phone-virtualization
+    status: exposed_via_installed_skills
+    exposure: all_project_agents
+    activation: automatic_task_match
+    implementation_status: route_only_not_runtime
+    repository_status: not_selected
+    skill_ids:
+      - api-and-interface-design
+      - performance-optimization
+      - observability-and-instrumentation
+    categories:
+      - cloud-phone
+      - android-virtualization
+      - emulator
+      - remote-control-infrastructure
+    install_trigger: explicit_runtime_and_infrastructure_choice
+    constraints:
+      - authorized_infrastructure_only
+      - no_provider_control_bypass
+      - resource_quota_and_isolation_required
+      - remote_access_must_be_loopback_or_authenticated
+    preferred_skill_ids:
+      - api-and-interface-design
+      - performance-optimization
+      - observability-and-instrumentation
+  - id: telegram-control
+    status: exposed_via_installed_skills
+    exposure: all_project_agents
+    activation: automatic_task_match
+    implementation_status: route_only_not_runtime
+    repository_status: not_selected
+    skill_ids:
+      - api-and-interface-design
+      - security-and-hardening
+      - observability-and-instrumentation
+    categories:
+      - telegram-bot-api
+      - group-and-channel-management
+      - automation-and-marketing
+      - custom-client
+      - mtproto
+    install_trigger: explicit_account_chat_scope_and_compliance_review
+    constraints:
+      - approved_accounts_and_chats_only
+      - no_spam_or_unauthorized_bulk_messaging
+      - no_session_or_credential_theft
+      - provider_rate_limits_required
+      - delivery_readback_and_audit_required
+    preferred_skill_ids:
+      - api-and-interface-design
+      - security-and-hardening
+      - observability-and-instrumentation
+
+verification:
+  command: pwsh -NoProfile -File .\scripts\Verify-Baseline.ps1
+  lockfile_check: skills-lock.json
+  headroom_check: headroom doctor
+  graph_refresh: pwsh -NoProfile -File .\scripts\Update-KnowledgeGraph.ps1

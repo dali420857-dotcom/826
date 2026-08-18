@@ -1,0 +1,25 @@
+schema_version: ecc.device-cloud-control.observability.v1
+logging:
+  level: information
+  format: structured
+  include_correlation_id: true
+  include_operation_id: true
+  persist_raw_payloads: false
+  redact_fields:
+    [token, authorization, password, secret, private_key, personal_data]
+
+audit:
+  enabled: true
+  required_for_mutation: true
+  required_fields:
+    [timestamp, actor, capability, resource_scope, decision, correlation_id]
+  retention_days: 30
+
+metrics:
+  enabled: true
+  names:
+    - capability_success_total
+    - capability_error_total
+    - fallback_entered_total
+    - mutation_readback_mismatch_total
+    - retry_attempt_total

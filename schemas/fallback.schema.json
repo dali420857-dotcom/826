@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ecc.device-cloud-control.fallback.v1",
+  "type": "object",
+  "required": [
+    "id",
+    "trigger",
+    "primary_action",
+    "fallback_action",
+    "retry",
+    "stop_condition",
+    "recovery",
+    "audit_event"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]+$" },
+    "trigger": { "type": "string", "minLength": 1 },
+    "primary_action": { "type": "string", "minLength": 1 },
+    "fallback_action": { "type": "string", "minLength": 1 },
+    "retry": {
+      "type": "object",
+      "required": ["max_attempts", "backoff_ms"],
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 0 },
+        "backoff_ms": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "stop_condition": { "type": "string", "minLength": 1 },
+    "recovery": { "type": "string", "minLength": 1 },
+    "audit_event": { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" }
+  }
+}

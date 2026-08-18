@@ -1,0 +1,19 @@
+flowchart TD
+    Failure["Failure or missing evidence"] --> Classify{ "Classify failure" }
+    Classify -->|timeout / transient network| Retry{ "Retry budget available?" }
+    Retry -->|yes| RetryCall["Retry with bounded backoff"]
+    Retry -->|no| ReadOnly["Stop mutations; use read-only cache"]
+    Classify -->|invalid input / policy denied| Reject["Reject and explain"]
+    Classify -->|invalid readback| Quarantine["Quarantine result and preserve evidence"]
+    Classify -->|mutation mismatch| Freeze["Freeze follow-up mutations"]
+    Classify -->|unknown| Stop["Safe stop and escalate"]
+    Classify -->|provider unavailable| LocalCache["Local stale read-only fixture"]
+    RetryCall --> Evidence["Fresh readback"]
+    Evidence -->|valid| Continue["Continue with typed response"]
+    Evidence -->|invalid| Quarantine
+    ReadOnly --> Audit["Audit fallback"]
+    LocalCache --> Audit
+    Reject --> Audit
+    Quarantine --> Audit
+    Freeze --> Audit
+    Stop --> Audit

@@ -1,0 +1,35 @@
+{
+  "name": "@dali/outreach-control-plane",
+  "version": "0.0.0-private",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.17.0",
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "test": "node ./scripts/run-tests.mjs run",
+    "test:watch": "node ./scripts/run-tests.mjs",
+    "test:browser": "node ./test/composition/browser-readback.mjs",
+    "runtime:monitor": "node --require ./scripts/no-egress-preload.cjs --import tsx ./scripts/start-runtime.ts",
+    "verify": "npm run typecheck && npm test && npm run build && npm run test:browser"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.5",
+    "jsdom": "30.0.1",
+    "playwright": "1.62.1",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2",
+    "vite": "8.2.1",
+    "vitest": "4.1.10"
+  }
+}

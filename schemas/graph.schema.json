@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ecc.device-cloud-control.graph.v1",
+  "type": "object",
+  "required": ["id", "kind", "nodes", "edges"],
+  "properties": {
+    "id": { "type": "string" },
+    "kind": {
+      "enum": [
+        "system-context",
+        "control-plane",
+        "data-flow",
+        "state-machine",
+        "fallback-decision"
+      ]
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "type": "object", "required": ["id", "label"] }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "type": "object", "required": ["from", "to"] }
+    }
+  }
+}
