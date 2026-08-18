@@ -1,0 +1,258 @@
+name: 826 scheduled automation
+
+on:
+  schedule:
+    - cron: "0 1 * * *"
+      timezone: "America/Los_Angeles"
+    - cron: "30 10 * * *"
+      timezone: "America/Los_Angeles"
+    - cron: "30 16 * * *"
+      timezone: "America/Los_Angeles"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  pull-requests: read
+
+concurrency:
+  group: 826-automation-${{ github.ref }}-${{ github.event.schedule || 'manual' }}
+  cancel-in-progress: false
+
+jobs:
+  automate:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: write
+      checks: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TZ: America/Los_Angeles
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Local-time slot guard
+        id: slot
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            run_now=true
+          else
+            case "$(date +'%H:%M')" in
+              01:00|10:30|16:30) run_now=true ;;
+              *) run_now=false ;;
+            esac
+          fi
+          echo "run=$run_now" >> "$GITHUB_OUTPUT"
+          if [[ "$run_now" == true ]]; then
+            echo "slot_key=$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify one-time repository gates
+        if: steps.slot.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_json="$(gh api "repos/${GITHUB_REPOSITORY}")"
+          if [[ "$(jq -r '.allow_auto_merge' <<<"$repo_json")" != true ]]; then
+            echo "allow_auto_merge is not enabled; stopping before any write."
+            exit 2
+          fi
+
+          protection="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main/protection")"
+          if [[ "$(jq -r '.required_status_checks != null' <<<"$protection")" != true ]]; then
+            echo "main has no required status checks; stopping before any write."
+            exit 2
+          fi
+          for required_check in "quality / root" "quality / outreach"; do
+            if ! jq -e --arg check "$required_check" '.required_status_checks.contexts | index($check) != null' <<<"$protection" >/dev/null; then
+              echo "required check missing: $required_check"
+              exit 2
+            fi
+          done
+          if [[ "$(jq -r '.required_pull_request_reviews.required_approving_review_count // 0' <<<"$protection")" != 0 ]]; then
+            echo "manual review is required by branch protection; stopping."
+            exit 2
+          fi
+
+      - name: Synchronize clean checkout
+        if: steps.slot.outputs.run == 'true'
+        run: node scripts/ci/sync.mjs --sync --branch main
+
+      - name: Check slot idempotency
+        id: idem
+        if: steps.slot.outputs.run == 'true'
+        shell: bash
+        env:
+          SLOT_KEY: ${{ steps.slot.outputs.slot_key }}
+        run: |
+          set -euo pipefail
+          branch="automation/${SLOT_KEY}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if git log --all --format=%s --grep="automation-slot:${SLOT_KEY}" --fixed-strings -n 1 | grep -q .; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "reason=slot_already_committed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "reason=slot_branch_exists" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$(gh pr list --head "$branch" --state all --json number --jq 'length > 0')" == true ]]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "reason=slot_pr_exists" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create isolated automation branch
+        if: steps.idem.outputs.proceed == 'true'
+        env:
+          AUTOMATION_BRANCH: ${{ steps.idem.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git switch --create "$AUTOMATION_BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Stage only tracked changes
+        id: changes
+        if: steps.idem.outputs.proceed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add --update
+          if git diff --cached --name-only | grep -q '^826-Emailautosave/reference-mail-control-panel-head-c3e1e80-20260528/'; then
+            echo "reference snapshot entered the staged set; stopping."
+            exit 2
+          fi
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push automation changes
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          AUTOMATION_BRANCH: ${{ steps.idem.outputs.branch }}
+          SLOT_KEY: ${{ steps.slot.outputs.slot_key }}
+        run: |
+          set -euo pipefail
+          git commit -m "chore: automated sync ${SLOT_KEY}" -m "automation-slot:${SLOT_KEY}"
+          git push --set-upstream origin "$AUTOMATION_BRANCH"
+
+      - name: Create pull request
+        id: pr
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          AUTOMATION_BRANCH: ${{ steps.idem.outputs.branch }}
+          SLOT_KEY: ${{ steps.slot.outputs.slot_key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="$(gh pr create \
+            --base main \
+            --head "$AUTOMATION_BRANCH" \
+            --title "chore: automated sync ${SLOT_KEY}" \
+            --body "Automated repository sync for slot ${SLOT_KEY}. No customer or message content is included.")"
+          number="${url##*/}"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "PR_NUMBER=$number" >> "$GITHUB_ENV"
+
+      - name: Dispatch quality workflow for the PR branch
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          AUTOMATION_BRANCH: ${{ steps.idem.outputs.branch }}
+        run: gh workflow run quality.yml --ref "$AUTOMATION_BRANCH"
+
+      - name: Wait for quality workflow
+        id: quality
+        if: steps.changes.outputs.changed == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          AUTOMATION_BRANCH: ${{ steps.idem.outputs.branch }}
+        run: |
+          set -euo pipefail
+          run_id=""
+          for _ in $(seq 1 60); do
+            run_id="$(gh run list --workflow quality.yml --branch "$AUTOMATION_BRANCH" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            [[ -n "$run_id" ]] && break
+            sleep 2
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "quality workflow did not start."
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          if gh run watch "$run_id" --exit-status; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Wait for checks and queue squash merge
+        if: steps.quality.outputs.result == 'success'
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          gh pr checks "$PR_NUMBER" --watch --interval 20
+          gh pr merge "$PR_NUMBER" --squash --auto
+
+      - name: Read back merge state
+        if: steps.quality.outputs.result == 'success'
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            state="$(gh pr view "$PR_NUMBER" --json state,mergedAt --jq '.state + "|" + (.mergedAt // "")')"
+            case "$state" in
+              MERGED\|*) exit 0 ;;
+              CLOSED\|*) echo "PR closed without merge."; exit 1 ;;
+            esac
+            sleep 5
+          done
+          echo "merge readback timed out."
+          exit 1
+
+      - name: Send masked Telegram result
+        if: always() && steps.slot.outputs.run == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLOT_KEY: ${{ steps.slot.outputs.slot_key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
+            echo "Telegram secrets are not configured; notification skipped."
+            exit 0
+          fi
+          text="826 automation status=${{ job.status }}; slot=${SLOT_KEY}; pr=${PR_NUMBER:-none}; run=${GITHUB_RUN_ID}"
+          curl --fail --silent --show-error --output /dev/null \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${text}" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
