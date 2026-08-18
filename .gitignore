@@ -41,3 +41,6 @@ graphify-out/memory/
 graphify-out/reflections/
 .DS_Store
 Thumbs.db
+
+# Historical reference snapshot: preserve on disk, never commit.
+826-Emailautosave/reference-mail-control-panel-head-c3e1e80-20260528/

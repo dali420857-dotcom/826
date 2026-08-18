@@ -1,0 +1,105 @@
+name: 826 quality
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  root:
+    name: quality / root
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Verify repository sync gate
+        run: node scripts/ci/sync.mjs --check --branch main
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Format check for CI scripts
+        run: npx --no-install prettier --check scripts/ci/sync.mjs
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Dependency audit
+        run: npm run audit -- --audit-level=high
+
+      - name: High-confidence secret pattern scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_paths="$(git grep --no-ext-diff -I -n -E \
+            '-----BEGIN (RSA|EC|OPENSSH|DSA|PGP) PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{20,}|[0-9]{8,10}:[A-Za-z0-9_-]{30,}' \
+            -- . ':(exclude)826-Emailautosave/reference-mail-control-panel-head-c3e1e80-20260528/**' \
+            | cut -d: -f1 | sort -u || true)"
+          if [[ -n "$secret_paths" ]]; then
+            echo "secret pattern detected in these paths:"
+            printf '%s\n' "$secret_paths"
+            exit 1
+          fi
+
+          forbidden_paths="$(git ls-files | grep -E '(^|/)\.env(\.|$)|\.(pem|key|p12|pfx|sqlite|db)$' | grep -vE '(^|/)\.env\.example$' || true)"
+          if [[ -n "$forbidden_paths" ]]; then
+            echo "forbidden sensitive paths are tracked:"
+            printf '%s\n' "$forbidden_paths"
+            exit 1
+          fi
+
+  outreach:
+    name: quality / outreach
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: 826-Emailautosave/production/dali-outreach
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: 826-Emailautosave/production/dali-outreach/package-lock.json
+
+      - name: Install outreach dependencies
+        run: npm ci
+
+      - name: Install Chromium for browser readback
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: Verify outreach project
+        run: npm run verify
