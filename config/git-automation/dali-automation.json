@@ -1,0 +1,92 @@
+{
+  "enabled": true,
+  "repositoryRoot": "../../..",
+  "remote": "origin",
+  "baseBranch": "main",
+  "branchPrefix": "automation/",
+  "worktreeRoot": "%LOCALAPPDATA%\\Dali-Automation\\git-automation\\dali-automation\\worktrees",
+  "receiptRoot": "%LOCALAPPDATA%\\Dali-Automation\\git-automation\\dali-automation\\receipts",
+  "allowedPaths": [
+    ".github",
+    "adapters",
+    "config",
+    "docs",
+    "migrations",
+    "openclaw_gateway",
+    "plugins",
+    "rules",
+    "schemas",
+    "scripts",
+    "skills",
+    "slack_codex_gateway",
+    "telegram_completion_bridge",
+    "tests",
+    "tools",
+    ".gitignore",
+    ".mcp.json",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTEXT.md",
+    "CONTRIBUTING.md",
+    "DESIGN.md",
+    "IDEA.md",
+    "README.md"
+  ],
+  "ignoredDirtyPaths": [
+    ".agents",
+    ".codex",
+    ".codex-remote-attachments",
+    ".dsh",
+    ".gitnexus",
+    ".local-private",
+    ".omp",
+    ".pi",
+    ".pytest_cache",
+    ".runtime",
+    ".scratch",
+    ".state",
+    ".tools",
+    ".venv",
+    ".vibeskills",
+    ".worktrees",
+    "826-Device-and-Cloud-Control",
+    "bundled",
+    "graphify-out",
+    "outputs",
+    "vendor"
+  ],
+  "forbiddenExtensions": [
+    ".env",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".db",
+    ".sqlite"
+  ],
+  "snapshotStabilityDelayMs": 3000,
+  "lockStaleMinutes": 120,
+  "remoteCleanup": { "enabled": true, "ttlHours": 48 },
+  "gitIdentity": {
+    "name": "github-actions[bot]",
+    "email": "41898282+github-actions[bot]@users.noreply.github.com"
+  },
+  "github": {
+    "command": "gh",
+    "prefixArgs": [],
+    "repository": "dali420857-dotcom/Dali-Automation",
+    "qualityWorkflow": "quality.yml",
+    "requiredChecks": ["quality / root"],
+    "mergeMethod": "merge",
+    "qualityRunPollAttempts": 60,
+    "qualityRunPollIntervalMs": 2000,
+    "mergePollAttempts": 60,
+    "mergePollIntervalMs": 5000
+  },
+  "validationCommands": [
+    {
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "./scripts/Verify-Baseline.ps1"]
+    }
+  ]
+}

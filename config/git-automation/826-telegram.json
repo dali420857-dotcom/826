@@ -1,0 +1,57 @@
+{
+  "enabled": true,
+  "repositoryRoot": "../../826-Telegram",
+  "remote": "origin",
+  "baseBranch": "main",
+  "branchPrefix": "automation/",
+  "worktreeRoot": "%LOCALAPPDATA%\\Dali-Automation\\git-automation\\826-telegram\\worktrees",
+  "receiptRoot": "%LOCALAPPDATA%\\Dali-Automation\\git-automation\\826-telegram\\receipts",
+  "allowedPaths": [
+    ".github",
+    "config",
+    "docs",
+    "graphs",
+    "schemas",
+    "scripts",
+    "src",
+    "tasks",
+    "tests",
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTEXT.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "SECURITY.md",
+    "SUPPORT.md"
+  ],
+  "ignoredDirtyPaths": ["runtime"],
+  "forbiddenExtensions": [
+    ".env",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".db",
+    ".sqlite"
+  ],
+  "snapshotStabilityDelayMs": 3000,
+  "lockStaleMinutes": 120,
+  "remoteCleanup": { "enabled": true, "ttlHours": 48 },
+  "gitIdentity": {
+    "name": "github-actions[bot]",
+    "email": "41898282+github-actions[bot]@users.noreply.github.com"
+  },
+  "github": {
+    "command": "gh",
+    "prefixArgs": [],
+    "repository": "dali420857-dotcom/826-Telegram",
+    "qualityWorkflow": "quality.yml",
+    "requiredChecks": ["quality / root"],
+    "mergeMethod": "merge",
+    "qualityRunPollAttempts": 60,
+    "qualityRunPollIntervalMs": 2000,
+    "mergePollAttempts": 60,
+    "mergePollIntervalMs": 5000
+  },
+  "validationCommands": []
+}

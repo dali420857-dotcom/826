@@ -22,12 +22,7 @@ describe("retired DALI console frontend", () => {
 
   it("documents the current browser-to-view mapping and replacement gap", () => {
     const source = readFileSync(
-      join(
-        process.cwd(),
-        "docs",
-        "architecture",
-        "README.md",
-      ),
+      join(process.cwd(), "docs", "architecture", "README.md"),
       "utf8",
     );
 
