@@ -12,6 +12,9 @@ describe("GitHub quality contract", () => {
     expect(workflow).toContain("name: quality / root");
     expect(workflow).not.toContain("Verify-Baseline.ps1");
     expect(workflow).not.toContain("quality / outreach");
+    expect(workflow.indexOf("Verify repository sync gate")).toBeLessThan(
+      workflow.indexOf("Install root dependencies"),
+    );
   });
 
   it("requires only the stable root check across the automation fleet", () => {

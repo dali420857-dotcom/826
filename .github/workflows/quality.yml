@@ -30,11 +30,11 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install root dependencies
-        run: npm ci
-
       - name: Verify repository sync gate
         run: node scripts/ci/sync.mjs --check --branch main
+
+      - name: Install root dependencies
+        run: npm ci
 
       - name: Lint
         run: npm run lint
