@@ -42,5 +42,9 @@ graphify-out/reflections/
 .DS_Store
 Thumbs.db
 
+# Independent child repositories managed from their own Git roots.
+/826-Telegram/
+/826-Emailautosave/
+
 # Historical reference snapshot: preserve on disk, never commit.
 826-Emailautosave/reference-mail-control-panel-head-c3e1e80-20260528/
