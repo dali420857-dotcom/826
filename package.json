@@ -19,7 +19,7 @@
     "capture:public-runtime": "node scripts/Capture-PublicRuntime.mjs",
     "build:offline": "node scripts/Build-OfflinePublicSnapshot.mjs",
     "lint": "eslint .",
-    "format:check": "prettier --check package.json index.html tsconfig.json vite.config.ts vitest.config.ts playwright.config.ts eslint.config.js scripts/*.mjs src tests e2e",
+    "format:check": "prettier --check --end-of-line auto package.json index.html tsconfig.json vite.config.ts vitest.config.ts playwright.config.ts eslint.config.js scripts/*.mjs src tests e2e",
     "audit": "npm audit --omit=dev",
     "toolchain:check": "node scripts/check-web-toolchain.mjs"
   },
