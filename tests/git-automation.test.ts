@@ -181,28 +181,31 @@ afterEach(() => {
 });
 
 describe("daily Git automation", () => {
-  it("renders the Windows schedule plan without registering a task", () => {
-    const execution = spawnSync(
-      "pwsh",
-      ["-NoProfile", "-File", REGISTER_SCRIPT, "-ConfigPath", PROJECT_CONFIG],
-      { encoding: "utf8" },
-    );
+  it.skipIf(process.platform !== "win32")(
+    "renders the Windows schedule plan without registering a task",
+    () => {
+      const execution = spawnSync(
+        "pwsh",
+        ["-NoProfile", "-File", REGISTER_SCRIPT, "-ConfigPath", PROJECT_CONFIG],
+        { encoding: "utf8" },
+      );
 
-    expect(execution.stderr).toBe("");
-    expect(execution.status).toBe(0);
-    expect(JSON.parse(execution.stdout)).toMatchObject({
-      status: "plan_only",
-      task_name: "Dali-Daily-Git-Automation-Fleet",
-      daily_at: ["01:00", "10:30", "16:30"],
-      settings: {
-        start_when_available: true,
-        wake_to_run: true,
-        run_only_if_network_available: true,
-        multiple_instances: "IgnoreNew",
-        execution_time_limit_hours: 2,
-      },
-    });
-  });
+      expect(execution.stderr).toBe("");
+      expect(execution.status).toBe(0);
+      expect(JSON.parse(execution.stdout)).toMatchObject({
+        status: "plan_only",
+        task_name: "Dali-Daily-Git-Automation-Fleet",
+        daily_at: ["01:00", "10:30", "16:30"],
+        settings: {
+          start_when_available: true,
+          wake_to_run: true,
+          run_only_if_network_available: true,
+          multiple_instances: "IgnoreNew",
+          execution_time_limit_hours: 2,
+        },
+      });
+    },
+  );
 
   it("validates an isolated snapshot and removes its worktree without mutating main", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();
@@ -1145,61 +1148,66 @@ describe("daily Git automation", () => {
     expect(readdirSync(worktreeRoot)).toEqual([]);
   }, 20_000);
 
-  it("preserves a Git executable-mode-only change in the automation commit", () => {
-    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
-    const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
-    const configPath = writeConfig(
-      root,
-      repository,
-      worktreeRoot,
-      receiptRoot,
-      {
-        gitIdentity: {
-          name: "automation[bot]",
-          email: "automation@example.invalid",
+  it.skipIf(process.platform !== "win32")(
+    "preserves a Git executable-mode-only change in the automation commit",
+    () => {
+      const { root, repository, worktreeRoot, receiptRoot } =
+        createRepository();
+      const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
+      const configPath = writeConfig(
+        root,
+        repository,
+        worktreeRoot,
+        receiptRoot,
+        {
+          gitIdentity: {
+            name: "automation[bot]",
+            email: "automation@example.invalid",
+          },
+          github: {
+            command: process.execPath,
+            prefixArgs: [fakeGitHub],
+            repository: "owner/repository",
+            qualityWorkflow: "quality.yml",
+            requiredChecks: ["quality / root", "quality / outreach"],
+            mergeMethod: "merge",
+            mergePollAttempts: 2,
+            mergePollIntervalMs: 0,
+          },
         },
-        github: {
-          command: process.execPath,
-          prefixArgs: [fakeGitHub],
-          repository: "owner/repository",
-          qualityWorkflow: "quality.yml",
-          requiredChecks: ["quality / root", "quality / outreach"],
-          mergeMethod: "merge",
-          mergePollAttempts: 2,
-          mergePollIntervalMs: 0,
-        },
-      },
-    );
-    git(repository, "update-index", "--chmod=+x", "src/app.txt");
+      );
+      git(repository, "update-index", "--chmod=+x", "src/app.txt");
 
-    const execution = spawnSync(
-      process.execPath,
-      [SCRIPT, "--config", configPath, "--execute", "--run-id", "mode-only"],
-      {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          FAKE_GH_LOG: logPath,
-          FAKE_GH_FAIL_COMMAND: "run watch",
+      const execution = spawnSync(
+        process.execPath,
+        [SCRIPT, "--config", configPath, "--execute", "--run-id", "mode-only"],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            FAKE_GH_LOG: logPath,
+            FAKE_GH_FAIL_COMMAND: "run watch",
+          },
         },
-      },
-    );
+      );
 
-    expect(execution.status).toBe(2);
-    expect(JSON.parse(execution.stdout)).toMatchObject({
-      status: "blocked",
-      artifacts: { changed_paths: ["src/app.txt"] },
-    });
-    expect(
-      git(
-        join(root, "origin.git"),
-        "ls-tree",
-        "refs/heads/automation/mode-only",
-        "--",
-        "src/app.txt",
-      ),
-    ).toMatch(/^100755\s+blob\s/u);
-  }, 20_000);
+      expect(execution.status).toBe(2);
+      expect(JSON.parse(execution.stdout)).toMatchObject({
+        status: "blocked",
+        artifacts: { changed_paths: ["src/app.txt"] },
+      });
+      expect(
+        git(
+          join(root, "origin.git"),
+          "ls-tree",
+          "refs/heads/automation/mode-only",
+          "--",
+          "src/app.txt",
+        ),
+      ).toMatch(/^100755\s+blob\s/u);
+    },
+    20_000,
+  );
 
   it("stops before push when GitHub auto-merge is not enabled", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();
