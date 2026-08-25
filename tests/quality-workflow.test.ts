@@ -15,6 +15,9 @@ describe("GitHub quality contract", () => {
     expect(workflow.indexOf("Verify repository sync gate")).toBeLessThan(
       workflow.indexOf("Install root dependencies"),
     );
+    expect(workflow).toContain(
+      "prettier --check --end-of-line auto scripts/ci/sync.mjs",
+    );
   });
 
   it("requires only the stable root check across the automation fleet", () => {

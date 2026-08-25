@@ -43,7 +43,7 @@ jobs:
         run: npm run format:check
 
       - name: Format check for CI scripts
-        run: npx --no-install prettier --check scripts/ci/sync.mjs
+        run: npx --no-install prettier --check --end-of-line auto scripts/ci/sync.mjs
 
       - name: Test
         run: npm test
