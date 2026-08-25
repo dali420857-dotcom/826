@@ -500,7 +500,7 @@ describe("daily Git automation", () => {
   );
 
   it("treats a config owned by a nested control repository as external to the target", () => {
-    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
+    const { repository, worktreeRoot, receiptRoot } = createRepository();
     const controlRepository = join(repository, "control-repository");
     mkdirSync(controlRepository, { recursive: true });
     git(controlRepository, "init");
