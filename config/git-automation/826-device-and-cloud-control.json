@@ -1,0 +1,66 @@
+{
+  "enabled": true,
+  "repositoryRoot": "../..",
+  "remote": "origin",
+  "baseBranch": "main",
+  "branchPrefix": "automation/",
+  "worktreeRoot": "%LOCALAPPDATA%\\Dali-Automation\\git-automation\\826-device-and-cloud-control\\worktrees",
+  "receiptRoot": "%LOCALAPPDATA%\\Dali-Automation\\git-automation\\826-device-and-cloud-control\\receipts",
+  "allowedPaths": [
+    ".github",
+    "config",
+    "docs",
+    "schemas",
+    "scripts",
+    "src",
+    "tests"
+  ],
+  "ignoredDirtyPaths": [
+    ".agents",
+    ".codex",
+    ".scratch",
+    "826-Emailautosave",
+    "826-Telegram",
+    "artifacts",
+    "dali-outreach",
+    "git-init-execution-preflight-20260818T163057Z.json",
+    "git-init-preflight-status-20260818T160024Z.json",
+    "git-untracked-classification-20260818T172320Z.json",
+    "graphify-out",
+    "outputs"
+  ],
+  "forbiddenExtensions": [
+    ".env",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".db",
+    ".sqlite"
+  ],
+  "snapshotStabilityDelayMs": 3000,
+  "lockStaleMinutes": 120,
+  "remoteCleanup": { "enabled": true, "ttlHours": 48 },
+  "gitIdentity": {
+    "name": "github-actions[bot]",
+    "email": "41898282+github-actions[bot]@users.noreply.github.com"
+  },
+  "github": {
+    "command": "gh",
+    "prefixArgs": [],
+    "repository": "dali420857-dotcom/826",
+    "qualityWorkflow": "quality.yml",
+    "requiredChecks": ["quality / root"],
+    "mergeMethod": "merge",
+    "qualityRunPollAttempts": 60,
+    "qualityRunPollIntervalMs": 2000,
+    "mergePollAttempts": 60,
+    "mergePollIntervalMs": 5000
+  },
+  "validationCommands": [
+    {
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "./scripts/Verify-Baseline.ps1"]
+    }
+  ]
+}

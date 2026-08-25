@@ -1,0 +1,61 @@
+{
+  "enabled": true,
+  "repositoryRoot": "../../826-Emailautosave",
+  "remote": "origin",
+  "baseBranch": "main",
+  "branchPrefix": "automation/",
+  "worktreeRoot": "%LOCALAPPDATA%\\Dali-Automation\\git-automation\\826-emailautosave\\worktrees",
+  "receiptRoot": "%LOCALAPPDATA%\\Dali-Automation\\git-automation\\826-emailautosave\\receipts",
+  "allowedPaths": [
+    ".github",
+    "docs",
+    "production",
+    "tasks",
+    "AGENTS.md",
+    "to-questionnaire-mailspring-private-adapter.md"
+  ],
+  "ignoredDirtyPaths": [
+    ".scratch",
+    ".vibeskills",
+    "outputs",
+    "reference-mail-control-panel-head-c3e1e80-20260528"
+  ],
+  "forbiddenExtensions": [
+    ".env",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".db",
+    ".sqlite"
+  ],
+  "snapshotStabilityDelayMs": 3000,
+  "lockStaleMinutes": 120,
+  "remoteCleanup": { "enabled": true, "ttlHours": 48 },
+  "gitIdentity": {
+    "name": "github-actions[bot]",
+    "email": "41898282+github-actions[bot]@users.noreply.github.com"
+  },
+  "github": {
+    "command": "gh",
+    "prefixArgs": [],
+    "repository": "dali420857-dotcom/826-Emailautosave",
+    "qualityWorkflow": "quality.yml",
+    "requiredChecks": ["quality / root"],
+    "mergeMethod": "merge",
+    "qualityRunPollAttempts": 60,
+    "qualityRunPollIntervalMs": 2000,
+    "mergePollAttempts": 60,
+    "mergePollIntervalMs": 5000
+  },
+  "validationCommands": [
+    {
+      "command": "npm",
+      "args": ["--prefix", "./production/dali-outreach", "ci"]
+    },
+    {
+      "command": "npm",
+      "args": ["--prefix", "./production/dali-outreach", "run", "verify"]
+    }
+  ]
+}

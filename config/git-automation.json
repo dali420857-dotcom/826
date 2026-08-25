@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "repositories": [
+    {
+      "id": "dali-automation",
+      "configPath": "git-automation/dali-automation.json"
+    },
+    {
+      "id": "826-device-and-cloud-control",
+      "configPath": "git-automation/826-device-and-cloud-control.json"
+    },
+    {
+      "id": "826-emailautosave",
+      "configPath": "git-automation/826-emailautosave.json"
+    },
+    {
+      "id": "826-telegram",
+      "configPath": "git-automation/826-telegram.json"
+    }
+  ]
+}

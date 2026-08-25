@@ -30,6 +30,10 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Verify project baseline and negative-regression gate
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/Verify-Baseline.ps1
+
       - name: Install root dependencies
         run: npm ci
 
@@ -74,32 +78,3 @@ jobs:
             printf '%s\n' "$forbidden_paths"
             exit 1
           fi
-
-  outreach:
-    name: quality / outreach
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: 826-Emailautosave/production/dali-outreach
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: 826-Emailautosave/production/dali-outreach/package-lock.json
-
-      - name: Install outreach dependencies
-        run: npm ci
-
-      - name: Install Chromium for browser readback
-        run: npx --no-install playwright install --with-deps chromium
-
-      - name: Verify outreach project
-        run: npm run verify
