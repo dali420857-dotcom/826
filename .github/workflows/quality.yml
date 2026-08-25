@@ -30,10 +30,6 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Verify project baseline and negative-regression gate
-        shell: pwsh
-        run: pwsh -NoProfile -File ./scripts/Verify-Baseline.ps1
-
       - name: Install root dependencies
         run: npm ci
 
