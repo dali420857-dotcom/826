@@ -27,7 +27,6 @@ const SCRIPT = resolve("scripts/git-automation/daily-git-automation.mjs");
 const REGISTER_SCRIPT = resolve(
   "scripts/git-automation/Register-DailyGitAutomationTask.ps1",
 );
-const PROJECT_CONFIG = resolve("config/git-automation.json");
 const temporaryRoots: string[] = [];
 
 function git(cwd: string, ...args: string[]): string {
@@ -223,9 +222,23 @@ afterEach(() => {
 
 describe("daily Git automation", () => {
   it("renders the Windows schedule plan without registering a task", () => {
+    const { root, repository } = createRepository();
+    const childConfigPath = join(root, "child.json");
+    const fleetConfigPath = join(root, "fleet.json");
+    writeFileSync(
+      childConfigPath,
+      JSON.stringify({ enabled: true, repositoryRoot: repository }),
+    );
+    writeFileSync(
+      fleetConfigPath,
+      JSON.stringify({
+        enabled: true,
+        repositories: [{ id: "fixture", configPath: "child.json" }],
+      }),
+    );
     const execution = spawnSync(
       "pwsh",
-      ["-NoProfile", "-File", REGISTER_SCRIPT, "-ConfigPath", PROJECT_CONFIG],
+      ["-NoProfile", "-File", REGISTER_SCRIPT, "-ConfigPath", fleetConfigPath],
       { encoding: "utf8" },
     );
 
@@ -351,8 +364,24 @@ describe("daily Git automation", () => {
     child.stdout.on("data", (chunk) => (stdout += chunk));
     child.stderr.on("data", (chunk) => (stderr += chunk));
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    writeFileSync(join(repository, "src", "app.txt"), "second version\n");
+    await vi.waitFor(
+      () => {
+        expect(existsSync(join(receiptRoot, "moving-run.active.json"))).toBe(
+          true,
+        );
+      },
+      { timeout: 10_000, interval: 50 },
+    );
+    let version = 0;
+    const changeTimer = setInterval(() => {
+      version += 1;
+      writeFileSync(
+        join(repository, "src", "app.txt"),
+        `changed version ${version}\n`,
+      );
+    }, 50);
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    clearInterval(changeTimer);
     const exitCode = await new Promise<number | null>((resolve) =>
       child.on("close", resolve),
     );
@@ -517,7 +546,14 @@ describe("daily Git automation", () => {
     // The trust gate must use Git's semantic clean-state check, not a raw
     // blob/working-file byte comparison.
     expect(() =>
-      git(repository, "diff", "--quiet", "HEAD", "--", "config/git-automation.json"),
+      git(
+        repository,
+        "diff",
+        "--quiet",
+        "HEAD",
+        "--",
+        "config/git-automation.json",
+      ),
     ).not.toThrow();
     expect(
       git(repository, "status", "--porcelain=v1", "--untracked-files=all"),
@@ -592,7 +628,7 @@ describe("daily Git automation", () => {
   );
 
   it("treats a config owned by a nested control repository as external to the target", () => {
-    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
+    const { repository, worktreeRoot, receiptRoot } = createRepository();
     const controlRepository = join(repository, "control-repository");
     mkdirSync(controlRepository, { recursive: true });
     git(controlRepository, "init");
@@ -934,7 +970,10 @@ describe("daily Git automation", () => {
       },
     );
     writeFileSync(join(repository, "src", "app.txt"), "ready to merge\n");
-    writeFileSync(join(repository, "ignored.txt"), "preserve staged user work\n");
+    writeFileSync(
+      join(repository, "ignored.txt"),
+      "preserve staged user work\n",
+    );
     git(repository, "add", "ignored.txt");
 
     const execution = spawnSync(
@@ -1250,24 +1289,37 @@ describe("daily Git automation", () => {
   it("blocks merge when the PR has no approved review", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();
     const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
-    const configPath = writeConfig(root, repository, worktreeRoot, receiptRoot, {
-      github: {
-        command: process.execPath,
-        prefixArgs: [fakeGitHub],
-        repository: "owner/repository",
-        qualityWorkflow: "quality.yml",
-        requiredChecks: ["quality / root", "quality / outreach"],
-        review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
-        mergeMethod: "merge",
-        mergePollAttempts: 1,
-        mergePollIntervalMs: 0,
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
+        },
       },
-    });
+    );
     writeFileSync(join(repository, "src", "app.txt"), "needs review\n");
 
     const execution = spawnSync(
       process.execPath,
-      [SCRIPT, "--config", configPath, "--execute", "--run-id", "review-required"],
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "review-required",
+      ],
       {
         encoding: "utf8",
         env: {
@@ -1297,24 +1349,37 @@ describe("daily Git automation", () => {
   it("blocks merge when the PR has unresolved review feedback", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();
     const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
-    const configPath = writeConfig(root, repository, worktreeRoot, receiptRoot, {
-      github: {
-        command: process.execPath,
-        prefixArgs: [fakeGitHub],
-        repository: "owner/repository",
-        qualityWorkflow: "quality.yml",
-        requiredChecks: ["quality / root", "quality / outreach"],
-        review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
-        mergeMethod: "merge",
-        mergePollAttempts: 1,
-        mergePollIntervalMs: 0,
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
+        },
       },
-    });
+    );
     writeFileSync(join(repository, "src", "app.txt"), "unresolved feedback\n");
 
     const execution = spawnSync(
       process.execPath,
-      [SCRIPT, "--config", configPath, "--execute", "--run-id", "feedback-required"],
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "feedback-required",
+      ],
       {
         encoding: "utf8",
         env: {
@@ -1342,29 +1407,42 @@ describe("daily Git automation", () => {
   it("requires a configured deployment readback before cleanup", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();
     const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
-    const configPath = writeConfig(root, repository, worktreeRoot, receiptRoot, {
-      deployment: {
-        mode: "required",
-        command: process.execPath,
-        args: ["-e", "process.exit(9)"],
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        deployment: {
+          mode: "required",
+          command: process.execPath,
+          args: ["-e", "process.exit(9)"],
+        },
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
+        },
       },
-      github: {
-        command: process.execPath,
-        prefixArgs: [fakeGitHub],
-        repository: "owner/repository",
-        qualityWorkflow: "quality.yml",
-        requiredChecks: ["quality / root", "quality / outreach"],
-        review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
-        mergeMethod: "merge",
-        mergePollAttempts: 1,
-        mergePollIntervalMs: 0,
-      },
-    });
+    );
     writeFileSync(join(repository, "src", "app.txt"), "deployment readback\n");
 
     const execution = spawnSync(
       process.execPath,
-      [SCRIPT, "--config", configPath, "--execute", "--run-id", "deployment-required"],
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "deployment-required",
+      ],
       {
         encoding: "utf8",
         env: {
@@ -1382,26 +1460,38 @@ describe("daily Git automation", () => {
       artifacts: { remote_branch_cleanup: "retained" },
     });
     expect(
-      git(repository, "ls-remote", "--heads", "origin", "automation/deployment-required"),
+      git(
+        repository,
+        "ls-remote",
+        "--heads",
+        "origin",
+        "automation/deployment-required",
+      ),
     ).not.toBe("");
   }, 20_000);
 
   it("blocks main sync when the original branch drifts after merge", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();
     const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
-    const configPath = writeConfig(root, repository, worktreeRoot, receiptRoot, {
-      github: {
-        command: process.execPath,
-        prefixArgs: [fakeGitHub],
-        repository: "owner/repository",
-        qualityWorkflow: "quality.yml",
-        requiredChecks: ["quality / root", "quality / outreach"],
-        review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
-        mergeMethod: "merge",
-        mergePollAttempts: 1,
-        mergePollIntervalMs: 0,
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
+        },
       },
-    });
+    );
     writeFileSync(join(repository, "src", "app.txt"), "main drift\n");
     const headBefore = git(repository, "rev-parse", "HEAD");
 
@@ -1426,7 +1516,13 @@ describe("daily Git automation", () => {
     });
     expect(git(repository, "rev-parse", "HEAD")).not.toBe(headBefore);
     expect(
-      git(repository, "ls-remote", "--heads", "origin", "automation/main-drift"),
+      git(
+        repository,
+        "ls-remote",
+        "--heads",
+        "origin",
+        "automation/main-drift",
+      ),
     ).not.toBe("");
   }, 20_000);
 
@@ -1434,19 +1530,25 @@ describe("daily Git automation", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();
     const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
     const gitShim = writeGitShim(root);
-    const configPath = writeConfig(root, repository, worktreeRoot, receiptRoot, {
-      github: {
-        command: process.execPath,
-        prefixArgs: [fakeGitHub],
-        repository: "owner/repository",
-        qualityWorkflow: "quality.yml",
-        requiredChecks: ["quality / root", "quality / outreach"],
-        review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
-        mergeMethod: "merge",
-        mergePollAttempts: 1,
-        mergePollIntervalMs: 0,
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
+        },
       },
-    });
+    );
     writeFileSync(join(repository, "src", "app.txt"), "restore index\n");
     writeFileSync(join(repository, "ignored.txt"), "staged user work\n");
     git(repository, "add", "ignored.txt");
@@ -1460,7 +1562,14 @@ describe("daily Git automation", () => {
 
     const execution = spawnSync(
       process.execPath,
-      [SCRIPT, "--config", configPath, "--execute", "--run-id", "sync-rollback"],
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "sync-rollback",
+      ],
       {
         encoding: "utf8",
         env: {
@@ -1698,7 +1807,14 @@ describe("daily Git automation", () => {
 
     const execution = spawnSync(
       process.execPath,
-      [SCRIPT, "--config", configPath, "--execute", "--run-id", "empty-bootstrap"],
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "empty-bootstrap",
+      ],
       {
         encoding: "utf8",
         env: {

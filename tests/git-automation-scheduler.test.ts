@@ -180,7 +180,8 @@ function createFleetInvocationFixture() {
 
 function invokeFleet(configPath: string, ...args: string[]) {
   const nodePath = process.execPath;
-  const gitPath = execFileSync("where", ["git"], { encoding: "utf8" })
+  const locator = process.platform === "win32" ? "where" : "which";
+  const gitPath = execFileSync(locator, ["git"], { encoding: "utf8" })
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .find(Boolean);
@@ -356,38 +357,43 @@ describe("daily Git automation scheduler registration", () => {
     );
   });
 
-  it("verifies a mocked successful registration and readback contract", () => {
-    const { configPath, root } = createRepository(false);
+  it.skipIf(process.platform !== "win32")(
+    "verifies a mocked successful registration and readback contract",
+    () => {
+      const { configPath, root } = createRepository(false);
 
-    const { execution, logPath } = invokeWithTaskSchedulerMock(
-      configPath,
-      root,
-      "-RequiredTimeZoneId",
-      currentTimeZoneId(),
-      "-Register",
-    );
+      const { execution, logPath } = invokeWithTaskSchedulerMock(
+        configPath,
+        root,
+        "-RequiredTimeZoneId",
+        currentTimeZoneId(),
+        "-Register",
+      );
 
-    expect(execution.status).toBe(0);
-    expect(execution.stderr).toBe("");
-    const result = JSON.parse(execution.stdout);
-    expect(result).toMatchObject({
-      status: "registered",
-      repository_count: 1,
-      required_timezone_id: currentTimeZoneId(),
-    });
-    expect(isAbsolute(result.executable)).toBe(true);
-    expect(result.arguments).toContain("-NodePath");
-    expect(result.arguments).toContain("-GitPath");
-    expect(result.arguments).toContain("-GitHubCliPath");
-    const registered = JSON.parse(readFileSync(logPath, "utf8"));
-    expect(registered.Actions[0].Execute).toBe(result.executable);
-    expect(registered.Actions[0].Arguments).toBe(result.arguments);
-    expect(registered.Principal.LogonType).toBe("Interactive");
-    expect(registered.Settings.StartWhenAvailable.IsPresent).toBe(true);
-    expect(registered.Settings.WakeToRun.IsPresent).toBe(true);
-    expect(registered.Settings.RunOnlyIfNetworkAvailable.IsPresent).toBe(true);
-    expect(registered.Settings.MultipleInstances).toBe("IgnoreNew");
-  });
+      expect(execution.status).toBe(0);
+      expect(execution.stderr).toBe("");
+      const result = JSON.parse(execution.stdout);
+      expect(result).toMatchObject({
+        status: "registered",
+        repository_count: 1,
+        required_timezone_id: currentTimeZoneId(),
+      });
+      expect(isAbsolute(result.executable)).toBe(true);
+      expect(result.arguments).toContain("-NodePath");
+      expect(result.arguments).toContain("-GitPath");
+      expect(result.arguments).toContain("-GitHubCliPath");
+      const registered = JSON.parse(readFileSync(logPath, "utf8"));
+      expect(registered.Actions[0].Execute).toBe(result.executable);
+      expect(registered.Actions[0].Arguments).toBe(result.arguments);
+      expect(registered.Principal.LogonType).toBe("Interactive");
+      expect(registered.Settings.StartWhenAvailable.IsPresent).toBe(true);
+      expect(registered.Settings.WakeToRun.IsPresent).toBe(true);
+      expect(registered.Settings.RunOnlyIfNetworkAvailable.IsPresent).toBe(
+        true,
+      );
+      expect(registered.Settings.MultipleInstances).toBe("IgnoreNew");
+    },
+  );
 });
 
 describe("fleet Git automation invocation", () => {

@@ -572,7 +572,7 @@ function run() {
   let command;
   try {
     command = JSON.parse(rawCommand);
-  } catch (error) {
+  } catch {
     return emitBlocked({
       root,
       registry: contract.registry,
