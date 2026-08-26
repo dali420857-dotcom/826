@@ -30,15 +30,15 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Verify repository sync gate
+        run: node scripts/ci/sync.mjs --check
+
       - name: Verify project baseline and negative-regression gate
         shell: pwsh
         run: pwsh -NoProfile -File ./scripts/Verify-Baseline.ps1 -SkipHostAutomationSurface
 
       - name: Install root dependencies
         run: npm ci
-
-      - name: Verify repository sync gate
-        run: node scripts/ci/sync.mjs --check
 
       - name: Lint
         run: npm run lint
