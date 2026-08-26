@@ -31,7 +31,11 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Verify repository sync gate
-        run: node scripts/ci/sync.mjs --check --branch main
+        run: node scripts/ci/sync.mjs --check
+
+      - name: Verify project baseline and negative-regression gate
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/Verify-Baseline.ps1 -SkipHostAutomationSurface
 
       - name: Install root dependencies
         run: npm ci
@@ -43,7 +47,7 @@ jobs:
         run: npm run format:check
 
       - name: Format check for CI scripts
-        run: npx --no-install prettier --check --end-of-line auto scripts/ci/sync.mjs
+        run: npx --no-install prettier --check scripts/ci/sync.mjs
 
       - name: Test
         run: npm test

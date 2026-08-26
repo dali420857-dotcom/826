@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Root = (Split-Path -Parent $PSScriptRoot)
+    [string]$Root = (Split-Path -Parent $PSScriptRoot),
+    [switch]$SkipHostAutomationSurface
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,11 +21,6 @@ function Require-File([string]$RelativePath) {
 $requiredFiles = @(
     'README.md',
     'AGENTS.md',
-    '.codex/config.toml',
-    '.codex/agents/explorer.toml',
-    '.codex/agents/reviewer.toml',
-    '.codex/agents/docs-researcher.toml',
-    '.codex/agents/hermes-research-coordinator.toml',
     '.env.example',
     'config/project-baseline.yaml',
     'config/capabilities.yaml',
@@ -34,11 +30,11 @@ $requiredFiles = @(
     'config/storage.yaml',
     'config/knowledge-graph.yaml',
     'config/skill-registry.yaml',
+    'config/negative-decisions.json',
+    'config/negative-regression-gate.json',
     'scripts/Invoke-SkillPreflight.ps1',
     'scripts/Invoke-HermesResearchPreflight.ps1',
-    '.agents/skills/ask-matt/SKILL.md',
-    '.agents/skills/ask-matt/agents/openai.yaml',
-    '.agents/skills/using-agent-skills/SKILL.md',
+    'scripts/ci/negative-regression-gate.mjs',
     'config/web-clone-toolchain.yaml',
     'config/profiles/safe-default.yaml',
     'config/profiles/rapid-prototype.yaml',
@@ -65,7 +61,42 @@ $requiredFiles = @(
     'scripts/check-web-toolchain.mjs'
 )
 
+if (-not $SkipHostAutomationSurface) {
+    $requiredFiles += @(
+        '.codex/config.toml',
+        '.codex/agents/explorer.toml',
+        '.codex/agents/reviewer.toml',
+        '.codex/agents/docs-researcher.toml',
+        '.codex/agents/hermes-research-coordinator.toml',
+        '.agents/skills/ask-matt/SKILL.md',
+        '.agents/skills/ask-matt/agents/openai.yaml',
+        '.agents/skills/using-agent-skills/SKILL.md'
+    )
+}
+
 foreach ($file in $requiredFiles) { Require-File $file }
+
+$negativeGatePath = Join-Path $Root 'scripts/ci/negative-regression-gate.mjs'
+$negativeGateConfigPath = Join-Path $Root 'config/negative-regression-gate.json'
+$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+if ($null -eq $nodeCommand) {
+    Add-Failure 'Negative-regression gate is blocked: Node.js is not available.'
+} elseif ((Test-Path -LiteralPath $negativeGatePath -PathType Leaf) -and (Test-Path -LiteralPath $negativeGateConfigPath -PathType Leaf)) {
+    try {
+        $negativeGateOutput = & $nodeCommand.Source $negativeGatePath --config $negativeGateConfigPath --root $Root 2>&1
+        $negativeGateExit = $LASTEXITCODE
+        foreach ($line in $negativeGateOutput) { Write-Host "NEGATIVE-REGRESSION: $line" }
+        if ($negativeGateExit -eq 1) {
+            Add-Failure 'Negative-regression gate detected an active forbidden-regression violation.'
+        } elseif ($negativeGateExit -eq 2) {
+            Add-Failure 'Negative-regression gate is blocked or has an invalid registry/verifier contract.'
+        } elseif ($negativeGateExit -ne 0) {
+            Add-Failure "Negative-regression gate returned unsupported exit code: $negativeGateExit"
+        }
+    } catch {
+        Add-Failure "Negative-regression gate execution failed: $($_.Exception.Message)"
+    }
+}
 
 $baselinePath = Join-Path $Root 'config/project-baseline.yaml'
 $baseline = if (Test-Path -LiteralPath $baselinePath) { Get-Content -Raw -LiteralPath $baselinePath } else { '' }
@@ -79,16 +110,20 @@ $requiredBaselineMarkers = @(
     'hermes_agent_preflight: scripts/Invoke-HermesResearchPreflight.ps1',
     'hermes_agent_role: .codex/agents/hermes-research-coordinator.toml',
     'web_clone_toolchain: config/web-clone-toolchain.yaml',
+    'negative_regression_gate: scripts/ci/negative-regression-gate.mjs',
+    'negative_decisions: config/negative-decisions.json',
     'required_readback: true'
 )
 foreach ($marker in $requiredBaselineMarkers) {
     if (-not $baseline.Contains($marker)) { Add-Failure "Baseline marker missing: $marker" }
 }
 
-$codexConfigPath = Join-Path $Root '.codex/config.toml'
-$codexConfig = if (Test-Path -LiteralPath $codexConfigPath) { Get-Content -Raw -LiteralPath $codexConfigPath } else { '' }
-foreach ($marker in @('[mcp_servers.github]', '[mcp_servers.context7]', '[mcp_servers.exa]', '[mcp_servers.firecrawl]', '[mcp_servers.memory]', '[mcp_servers.playwright]', '[mcp_servers.sequential-thinking]', '[features]', 'multi_agent = true', 'multi_agent_v2 = true', '[agents.hermes_research_coordinator]', 'agents/hermes-research-coordinator.toml', 'sandbox_mode = "workspace-write"', 'Invoke-SkillPreflight.ps1', 'Invoke-HermesResearchPreflight.ps1')) {
-    if (-not $codexConfig.Contains($marker)) { Add-Failure "Codex config marker missing: $marker" }
+if (-not $SkipHostAutomationSurface) {
+    $codexConfigPath = Join-Path $Root '.codex/config.toml'
+    $codexConfig = if (Test-Path -LiteralPath $codexConfigPath) { Get-Content -Raw -LiteralPath $codexConfigPath } else { '' }
+    foreach ($marker in @('[mcp_servers.github]', '[mcp_servers.context7]', '[mcp_servers.exa]', '[mcp_servers.firecrawl]', '[mcp_servers.memory]', '[mcp_servers.playwright]', '[mcp_servers.sequential-thinking]', '[features]', 'multi_agent = true', 'multi_agent_v2 = true', '[agents.hermes_research_coordinator]', 'agents/hermes-research-coordinator.toml', 'sandbox_mode = "workspace-write"', 'Invoke-SkillPreflight.ps1', 'Invoke-HermesResearchPreflight.ps1')) {
+        if (-not $codexConfig.Contains($marker)) { Add-Failure "Codex config marker missing: $marker" }
+    }
 }
 
 $knowledgeGraphPath = Join-Path $Root 'config/knowledge-graph.yaml'
@@ -122,51 +157,53 @@ if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) {
     }
 }
 
-$skillsPath = Join-Path $Root '.agents/skills'
-$installedSkillCount = if (Test-Path -LiteralPath $skillsPath -PathType Container) { @(Get-ChildItem -LiteralPath $skillsPath -Directory).Count } else { 0 }
-if ($installedSkillCount -lt 1) { Add-Failure 'No project-scoped skills found under .agents/skills.' }
-if ($lockSkillCount -gt 0 -and $installedSkillCount -ne $lockSkillCount) {
-    Add-Failure "Project skill directory count ($installedSkillCount) does not match skills-lock.json ($lockSkillCount)."
-}
-
-$preflightPath = Join-Path $Root 'scripts/Invoke-SkillPreflight.ps1'
-if (Test-Path -LiteralPath $preflightPath -PathType Leaf) {
-    try {
-        $preflight = (& pwsh -NoProfile -File $preflightPath | ConvertFrom-Json)
-        foreach ($field in @('status', 'summary', 'next_actions', 'artifacts')) {
-            if ($null -eq $preflight.$field) { Add-Failure "Skill preflight response is missing field: $field" }
-        }
-        if ($preflight.status -ne 'success') { Add-Failure "Skill preflight did not pass: $($preflight.summary)" }
-        if ($preflight.artifacts.network_requests -ne $false -or $preflight.artifacts.external_mutations -ne $false) {
-            Add-Failure 'Skill preflight must remain local-only and mutation-free.'
-        }
-        if ($preflight.artifacts.mandatory_router.name -ne 'ask-matt' -or $preflight.artifacts.mandatory_router.activation -ne 'every_task' -or $preflight.artifacts.mandatory_router.ready -ne $true) {
-            Add-Failure 'Skill preflight must report a ready ask-matt mandatory router.'
-        }
-        if ($preflight.artifacts.mandatory_agent_engineering_router.name -ne 'using-agent-skills' -or $preflight.artifacts.mandatory_agent_engineering_router.activation -ne 'every_task' -or $preflight.artifacts.mandatory_agent_engineering_router.source -ne 'mattpocock/skills' -or $preflight.artifacts.mandatory_agent_engineering_router.skill_count -lt 1 -or $preflight.artifacts.mandatory_agent_engineering_router.ready -ne $true) {
-            Add-Failure 'Skill preflight must report a ready using-agent-skills engineering router with locked engineering skills.'
-        }
-    } catch {
-        Add-Failure "Skill preflight execution failed: $($_.Exception.Message)"
+if (-not $SkipHostAutomationSurface) {
+    $skillsPath = Join-Path $Root '.agents/skills'
+    $installedSkillCount = if (Test-Path -LiteralPath $skillsPath -PathType Container) { @(Get-ChildItem -LiteralPath $skillsPath -Directory).Count } else { 0 }
+    if ($installedSkillCount -lt 1) { Add-Failure 'No project-scoped skills found under .agents/skills.' }
+    if ($lockSkillCount -gt 0 -and $installedSkillCount -ne $lockSkillCount) {
+        Add-Failure "Project skill directory count ($installedSkillCount) does not match skills-lock.json ($lockSkillCount)."
     }
-}
 
-$hermesPreflightPath = Join-Path $Root 'scripts/Invoke-HermesResearchPreflight.ps1'
-if (Test-Path -LiteralPath $hermesPreflightPath -PathType Leaf) {
-    try {
-        $hermesPreflight = (& pwsh -NoProfile -File $hermesPreflightPath | ConvertFrom-Json)
-        foreach ($field in @('status', 'summary', 'next_actions', 'artifacts')) {
-            if ($null -eq $hermesPreflight.$field) { Add-Failure "Hermes preflight response is missing field: $field" }
+    $preflightPath = Join-Path $Root 'scripts/Invoke-SkillPreflight.ps1'
+    if (Test-Path -LiteralPath $preflightPath -PathType Leaf) {
+        try {
+            $preflight = (& pwsh -NoProfile -File $preflightPath | ConvertFrom-Json)
+            foreach ($field in @('status', 'summary', 'next_actions', 'artifacts')) {
+                if ($null -eq $preflight.$field) { Add-Failure "Skill preflight response is missing field: $field" }
+            }
+            if ($preflight.status -ne 'success') { Add-Failure "Skill preflight did not pass: $($preflight.summary)" }
+            if ($preflight.artifacts.network_requests -ne $false -or $preflight.artifacts.external_mutations -ne $false) {
+                Add-Failure 'Skill preflight must remain local-only and mutation-free.'
+            }
+            if ($preflight.artifacts.mandatory_router.name -ne 'ask-matt' -or $preflight.artifacts.mandatory_router.activation -ne 'every_task' -or $preflight.artifacts.mandatory_router.ready -ne $true) {
+                Add-Failure 'Skill preflight must report a ready ask-matt mandatory router.'
+            }
+            if ($preflight.artifacts.mandatory_agent_engineering_router.name -ne 'using-agent-skills' -or $preflight.artifacts.mandatory_agent_engineering_router.activation -ne 'every_task' -or $preflight.artifacts.mandatory_agent_engineering_router.source -ne 'mattpocock/skills' -or $preflight.artifacts.mandatory_agent_engineering_router.skill_count -lt 1 -or $preflight.artifacts.mandatory_agent_engineering_router.ready -ne $true) {
+                Add-Failure 'Skill preflight must report a ready using-agent-skills engineering router with locked engineering skills.'
+            }
+        } catch {
+            Add-Failure "Skill preflight execution failed: $($_.Exception.Message)"
         }
-        if ($hermesPreflight.status -eq 'error') { Add-Failure "Hermes preflight did not pass: $($hermesPreflight.summary)" }
-        if ($hermesPreflight.artifacts.external_mutations -ne $false -or $hermesPreflight.artifacts.mutation_applied -ne $false -or $hermesPreflight.artifacts.credentials_accessed -ne $false) {
-            Add-Failure 'Hermes preflight must remain mutation-free and credential-free.'
+    }
+
+    $hermesPreflightPath = Join-Path $Root 'scripts/Invoke-HermesResearchPreflight.ps1'
+    if (Test-Path -LiteralPath $hermesPreflightPath -PathType Leaf) {
+        try {
+            $hermesPreflight = (& pwsh -NoProfile -File $hermesPreflightPath | ConvertFrom-Json)
+            foreach ($field in @('status', 'summary', 'next_actions', 'artifacts')) {
+                if ($null -eq $hermesPreflight.$field) { Add-Failure "Hermes preflight response is missing field: $field" }
+            }
+            if ($hermesPreflight.status -eq 'error') { Add-Failure "Hermes preflight did not pass: $($hermesPreflight.summary)" }
+            if ($hermesPreflight.artifacts.external_mutations -ne $false -or $hermesPreflight.artifacts.mutation_applied -ne $false -or $hermesPreflight.artifacts.credentials_accessed -ne $false) {
+                Add-Failure 'Hermes preflight must remain mutation-free and credential-free.'
+            }
+            if ($hermesPreflight.artifacts.adapter_status -notin @('contract_only_not_live', 'loopback_verified')) {
+                Add-Failure "Hermes preflight returned an unknown adapter status: $($hermesPreflight.artifacts.adapter_status)"
+            }
+        } catch {
+            Add-Failure "Hermes preflight execution failed: $($_.Exception.Message)"
         }
-        if ($hermesPreflight.artifacts.adapter_status -notin @('contract_only_not_live', 'loopback_verified')) {
-            Add-Failure "Hermes preflight returned an unknown adapter status: $($hermesPreflight.artifacts.adapter_status)"
-        }
-    } catch {
-        Add-Failure "Hermes preflight execution failed: $($_.Exception.Message)"
     }
 }
 
@@ -240,5 +277,6 @@ if ($failures.Count -gt 0) {
 
 Write-Host 'BASELINE VERIFICATION: PASS' -ForegroundColor Green
 Write-Host "Files checked: $($requiredFiles.Count) required files plus graph, schema, and secret scans"
+Write-Host "Host automation surface: $(if ($SkipHostAutomationSurface) { 'skipped for CI' } else { 'verified' })"
 Write-Host 'Active profile: safe-default'
 Write-Host 'External connectors: placeholders only'

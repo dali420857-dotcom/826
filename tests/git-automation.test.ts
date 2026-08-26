@@ -27,7 +27,6 @@ const SCRIPT = resolve("scripts/git-automation/daily-git-automation.mjs");
 const REGISTER_SCRIPT = resolve(
   "scripts/git-automation/Register-DailyGitAutomationTask.ps1",
 );
-const PROJECT_CONFIG = resolve("config/git-automation.json");
 const temporaryRoots: string[] = [];
 
 function git(cwd: string, ...args: string[]): string {
@@ -38,7 +37,9 @@ function git(cwd: string, ...args: string[]): string {
   }).trim();
 }
 
-function createRepository() {
+function createRepository({
+  pushInitial = true,
+}: { pushInitial?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "daily-git-automation-"));
   temporaryRoots.push(root);
   const origin = join(root, "origin.git");
@@ -62,7 +63,9 @@ function createRepository() {
   writeFileSync(join(repository, "ignored.txt"), "unchanged\n");
   git(repository, "add", "src/app.txt", "docs/note.md", "ignored.txt");
   git(repository, "commit", "-m", "initial");
-  git(repository, "push", "-u", "origin", "main");
+  if (pushInitial) {
+    git(repository, "push", "-u", "origin", "main");
+  }
 
   return { root, repository, worktreeRoot, receiptRoot };
 }
@@ -75,31 +78,49 @@ function writeConfig(
   overrides: Record<string, unknown> = {},
 ) {
   const configPath = join(root, "git-automation.json");
+  const defaults = {
+    enabled: true,
+    repositoryRoot: repository,
+    remote: "origin",
+    baseBranch: "main",
+    branchPrefix: "automation/",
+    worktreeRoot,
+    receiptRoot,
+    allowedPaths: ["src", "docs"],
+    ignoredDirtyPaths: ["ignored.txt"],
+    forbiddenExtensions: [
+      ".env",
+      ".pem",
+      ".key",
+      ".p12",
+      ".pfx",
+      ".db",
+      ".sqlite",
+    ],
+    snapshotStabilityDelayMs: 0,
+    validationCommands: [],
+    deployment: {
+      mode: "not_applicable",
+      reason: "Test fixture has no deployment target.",
+    },
+  };
+  const mergedGithub =
+    overrides.github && typeof overrides.github === "object"
+      ? {
+          review: {
+            requiredApprovals: 1,
+            requireNoUnresolvedFeedback: true,
+          },
+          ...(overrides.github as Record<string, unknown>),
+        }
+      : undefined;
   writeFileSync(
     configPath,
     JSON.stringify(
       {
-        enabled: true,
-        repositoryRoot: repository,
-        remote: "origin",
-        baseBranch: "main",
-        branchPrefix: "automation/",
-        worktreeRoot,
-        receiptRoot,
-        allowedPaths: ["src", "docs"],
-        ignoredDirtyPaths: ["ignored.txt"],
-        forbiddenExtensions: [
-          ".env",
-          ".pem",
-          ".key",
-          ".p12",
-          ".pfx",
-          ".db",
-          ".sqlite",
-        ],
-        snapshotStabilityDelayMs: 0,
-        validationCommands: [],
+        ...defaults,
         ...overrides,
+        ...(mergedGithub ? { github: mergedGithub } : {}),
       },
       null,
       2,
@@ -111,16 +132,21 @@ function writeConfig(
 function writeFakeGitHub(root: string) {
   const scriptPath = join(root, "fake-gh.mjs");
   const logPath = join(root, "fake-gh.jsonl");
+  const mergeShaPath = join(root, "merge-sha.txt");
   writeFileSync(
     scriptPath,
     `import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
  const args = process.argv.slice(2);
  const previousCalls = existsSync(process.env.FAKE_GH_LOG) ? readFileSync(process.env.FAKE_GH_LOG, "utf8").trim().split("\\n").filter(Boolean) : [];
  appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(args) + "\\n");
  const command = args.slice(0, 2).join(" ");
  if (process.env.FAKE_GH_FAIL_COMMAND === command) process.exit(9);
-if (args[0] === "api" && args[1].endsWith("/protection")) process.stdout.write(JSON.stringify({ required_status_checks: { contexts: ["quality / root", "quality / outreach"] }, required_pull_request_reviews: { required_approving_review_count: 0 } }) + "\\n");
+if (args[0] === "api" && args[1] === "graphql") {
+  process.stdout.write(JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: process.env.FAKE_GH_UNRESOLVED === "true" ? [{ isResolved: false }] : [], pageInfo: { hasNextPage: false } } } } } }) + "\\n");
+}
+else if (args[0] === "api" && args[1].endsWith("/protection")) process.stdout.write(JSON.stringify({ required_status_checks: { contexts: ["quality / root", "quality / outreach"] }, required_pull_request_reviews: { required_approving_review_count: Number(process.env.FAKE_GH_REQUIRED_APPROVALS || 1) } }) + "\\n");
  else if (args[0] === "api") process.stdout.write(JSON.stringify({ allow_auto_merge: process.env.FAKE_GH_AUTO_MERGE !== "false" }) + "\\n");
  if (command === "pr create") process.stdout.write("https://github.test/pull/42\\n");
  if (command === "pr list") process.stdout.write("[]\\n");
@@ -128,13 +154,26 @@ if (args[0] === "api" && args[1].endsWith("/protection")) process.stdout.write(J
  if (command === "pr view") {
    const viewCount = previousCalls.filter((line) => JSON.parse(line).slice(0, 2).join(" ") === "pr view").length;
    const headRefOid = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-   const wrongHead = process.env.FAKE_GH_HEAD_MISMATCH === "true" || (process.env.FAKE_GH_MERGED_REF_MISMATCH === "true" && viewCount > 0);
-   const wrongBase = process.env.FAKE_GH_BASE_MISMATCH === "true" || (process.env.FAKE_GH_MERGED_REF_MISMATCH === "true" && viewCount > 0);
-   process.stdout.write(JSON.stringify({ state: "MERGED", mergedAt: "2026-08-24T12:00:00Z", mergeCommit: { oid: "merge-sha" }, headRefName: process.env.FAKE_GH_HEAD_NAME || "automation/test-run", headRefOid: wrongHead ? "wrong-head" : headRefOid, baseRefName: wrongBase ? "wrong-base" : "main" }) + "\\n");
+   const wrongHead = process.env.FAKE_GH_HEAD_MISMATCH === "true" || (process.env.FAKE_GH_MERGED_REF_MISMATCH === "true" && viewCount > 1);
+   const wrongBase = process.env.FAKE_GH_BASE_MISMATCH === "true" || (process.env.FAKE_GH_MERGED_REF_MISMATCH === "true" && viewCount > 1);
+   process.stdout.write(JSON.stringify({ state: "MERGED", mergedAt: "2026-08-24T12:00:00Z", mergeCommit: { oid: existsSync(process.env.FAKE_GH_MERGE_SHA_FILE || "") ? readFileSync(process.env.FAKE_GH_MERGE_SHA_FILE, "utf8").trim() : "merge-sha" }, headRefName: process.env.FAKE_GH_HEAD_NAME || "automation/test-run", headRefOid: wrongHead ? "wrong-head" : headRefOid, baseRefName: wrongBase ? "wrong-base" : "main", reviewDecision: process.env.FAKE_GH_REVIEW_DECISION || (process.env.FAKE_GH_REVIEW_STATE === "COMMENTED" ? "REVIEW_REQUIRED" : "APPROVED"), reviews: [{ state: process.env.FAKE_GH_REVIEW_STATE || "APPROVED", author: { login: "fixture-reviewer" } }] }) + "\\n");
+ }
+ if (command === "pr merge") {
+   const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
+   const parent = execFileSync("git", ["rev-parse", "origin/main"], { encoding: "utf8" }).trim();
+   const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+   const merge = execFileSync("git", ["commit-tree", tree, "-p", parent, "-p", head], { encoding: "utf8", input: "fixture merge\\n" }).trim();
+   execFileSync("git", ["push", "origin", "".concat(merge, ":refs/heads/main")], { stdio: "ignore" });
+   if (process.env.FAKE_GH_MERGE_SHA_FILE) writeFileSync(process.env.FAKE_GH_MERGE_SHA_FILE, "".concat(merge, "\\n"));
+   if (process.env.FAKE_GH_DRIFT_MAIN_REPO) {
+     writeFileSync(join(process.env.FAKE_GH_DRIFT_MAIN_REPO, "ignored.txt"), "drifted after snapshot\\n");
+     execFileSync("git", ["-C", process.env.FAKE_GH_DRIFT_MAIN_REPO, "add", "ignored.txt"], { stdio: "ignore" });
+     execFileSync("git", ["-C", process.env.FAKE_GH_DRIFT_MAIN_REPO, "commit", "-m", "fixture main drift"], { stdio: "ignore" });
+   }
  }
 `,
   );
-  return { scriptPath, logPath };
+  return { scriptPath, logPath, mergeShaPath };
 }
 
 function writeGitShim(root: string) {
@@ -158,6 +197,7 @@ const args = process.argv.slice(2);
 if (args[0] === "ls-remote" && process.env.FAIL_LS_REMOTE === "1") process.exit(128);
 if (args[0] === "worktree" && args[1] === "remove" && process.env.FAIL_WORKTREE_REMOVE === "1") process.exit(9);
 if (args[0] === "branch" && args[1] === "--delete" && process.env.FAIL_BRANCH_DELETE === "1") process.exit(9);
+if (args[0] === "update-ref" && process.env.FAIL_UPDATE_REF === "1") process.exit(9);
 const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
 process.exit(result.status ?? 1);
 `,
@@ -181,31 +221,42 @@ afterEach(() => {
 });
 
 describe("daily Git automation", () => {
-  it.skipIf(process.platform !== "win32")(
-    "renders the Windows schedule plan without registering a task",
-    () => {
-      const execution = spawnSync(
-        "pwsh",
-        ["-NoProfile", "-File", REGISTER_SCRIPT, "-ConfigPath", PROJECT_CONFIG],
-        { encoding: "utf8" },
-      );
+  it("renders the Windows schedule plan without registering a task", () => {
+    const { root, repository } = createRepository();
+    const childConfigPath = join(root, "child.json");
+    const fleetConfigPath = join(root, "fleet.json");
+    writeFileSync(
+      childConfigPath,
+      JSON.stringify({ enabled: true, repositoryRoot: repository }),
+    );
+    writeFileSync(
+      fleetConfigPath,
+      JSON.stringify({
+        enabled: true,
+        repositories: [{ id: "fixture", configPath: "child.json" }],
+      }),
+    );
+    const execution = spawnSync(
+      "pwsh",
+      ["-NoProfile", "-File", REGISTER_SCRIPT, "-ConfigPath", fleetConfigPath],
+      { encoding: "utf8" },
+    );
 
-      expect(execution.stderr).toBe("");
-      expect(execution.status).toBe(0);
-      expect(JSON.parse(execution.stdout)).toMatchObject({
-        status: "plan_only",
-        task_name: "Dali-Daily-Git-Automation-Fleet",
-        daily_at: ["01:00", "10:30", "16:30"],
-        settings: {
-          start_when_available: true,
-          wake_to_run: true,
-          run_only_if_network_available: true,
-          multiple_instances: "IgnoreNew",
-          execution_time_limit_hours: 2,
-        },
-      });
-    },
-  );
+    expect(execution.stderr).toBe("");
+    expect(execution.status).toBe(0);
+    expect(JSON.parse(execution.stdout)).toMatchObject({
+      status: "plan_only",
+      task_name: "Dali-Daily-Git-Automation-Fleet",
+      daily_at: ["01:00", "10:30", "16:30"],
+      settings: {
+        start_when_available: true,
+        wake_to_run: true,
+        run_only_if_network_available: true,
+        multiple_instances: "IgnoreNew",
+        execution_time_limit_hours: 2,
+      },
+    });
+  });
 
   it("validates an isolated snapshot and removes its worktree without mutating main", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();
@@ -223,7 +274,6 @@ describe("daily Git automation", () => {
       "--porcelain=v1",
       "--untracked-files=all",
     );
-
     const execution = spawnSync(
       process.execPath,
       [SCRIPT, "--config", configPath, "--dry-run", "--run-id", "test-run"],
@@ -314,8 +364,24 @@ describe("daily Git automation", () => {
     child.stdout.on("data", (chunk) => (stdout += chunk));
     child.stderr.on("data", (chunk) => (stderr += chunk));
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    writeFileSync(join(repository, "src", "app.txt"), "second version\n");
+    await vi.waitFor(
+      () => {
+        expect(existsSync(join(receiptRoot, "moving-run.active.json"))).toBe(
+          true,
+        );
+      },
+      { timeout: 10_000, interval: 50 },
+    );
+    let version = 0;
+    const changeTimer = setInterval(() => {
+      version += 1;
+      writeFileSync(
+        join(repository, "src", "app.txt"),
+        `changed version ${version}\n`,
+      );
+    }, 50);
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    clearInterval(changeTimer);
     const exitCode = await new Promise<number | null>((resolve) =>
       child.on("close", resolve),
     );
@@ -461,6 +527,65 @@ describe("daily Git automation", () => {
       base_ref: "origin/main",
     });
     expect(existsSync(worktreeRoot)).toBe(false);
+  });
+
+  it("allows execute when a repository-owned config is committed in local HEAD ahead of origin/main", () => {
+    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
+    const externalConfig = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+    );
+    const internalConfig = join(repository, "config", "git-automation.json");
+    mkdirSync(join(repository, "config"), { recursive: true });
+    writeFileSync(internalConfig, readFileSync(externalConfig));
+
+    git(repository, "add", "config/git-automation.json");
+    git(repository, "commit", "-m", "add local automation config");
+    // The trust gate must use Git's semantic clean-state check, not a raw
+    // blob/working-file byte comparison.
+    expect(() =>
+      git(
+        repository,
+        "diff",
+        "--quiet",
+        "HEAD",
+        "--",
+        "config/git-automation.json",
+      ),
+    ).not.toThrow();
+    expect(
+      git(repository, "status", "--porcelain=v1", "--untracked-files=all"),
+    ).toBe("");
+
+    const execution = spawnSync(
+      process.execPath,
+      [
+        SCRIPT,
+        "--config",
+        internalConfig,
+        "--execute",
+        "--run-id",
+        "local-head-config",
+      ],
+      { encoding: "utf8" },
+    );
+
+    expect(execution.status, `${execution.stdout}\n${execution.stderr}`).toBe(
+      0,
+    );
+    expect(JSON.parse(execution.stdout)).toMatchObject({
+      status: "verified",
+      summary: "no_changes",
+      artifacts: {
+        base_ref: "origin/main",
+        source_relation: "ahead",
+        changed: false,
+        cleanup_status: "removed",
+      },
+    });
+    expect(readdirSync(worktreeRoot)).toEqual([]);
   });
 
   it.skipIf(process.platform !== "win32" || !existsSync("D:\\"))(
@@ -705,7 +830,11 @@ describe("daily Git automation", () => {
       ],
       {
         encoding: "utf8",
-        env: { ...process.env, FAKE_GH_LOG: logPath },
+        env: {
+          ...process.env,
+          FAKE_GH_LOG: logPath,
+          FAKE_GH_MERGE_SHA_FILE: join(root, "merge-sha.txt"),
+        },
       },
     );
 
@@ -841,20 +970,22 @@ describe("daily Git automation", () => {
       },
     );
     writeFileSync(join(repository, "src", "app.txt"), "ready to merge\n");
-    const headBefore = git(repository, "rev-parse", "HEAD");
-    const statusBefore = git(
-      repository,
-      "status",
-      "--porcelain=v1",
-      "--untracked-files=all",
+    writeFileSync(
+      join(repository, "ignored.txt"),
+      "preserve staged user work\n",
     );
+    git(repository, "add", "ignored.txt");
 
     const execution = spawnSync(
       process.execPath,
       [SCRIPT, "--config", configPath, "--execute", "--run-id", "merge-run"],
       {
         encoding: "utf8",
-        env: { ...process.env, FAKE_GH_LOG: logPath },
+        env: {
+          ...process.env,
+          FAKE_GH_LOG: logPath,
+          FAKE_GH_MERGE_SHA_FILE: join(root, "merge-sha.txt"),
+        },
       },
     );
 
@@ -869,7 +1000,7 @@ describe("daily Git automation", () => {
         branch: "automation/merge-run",
         pr_number: 42,
         quality_run_id: "9001",
-        merge_commit_sha: "merge-sha",
+        merge_commit_sha: expect.stringMatching(/^[0-9a-f]{40}$/u),
         remote_branch_cleanup: "deleted",
         local_branch_cleanup: "deleted",
         cleanup_status: "removed",
@@ -882,10 +1013,15 @@ describe("daily Git automation", () => {
     expect(git(repository, "branch", "--list", "automation/merge-run")).toBe(
       "",
     );
-    expect(git(repository, "rev-parse", "HEAD")).toBe(headBefore);
+    expect(git(repository, "rev-parse", "HEAD")).toBe(
+      result.artifacts.merge_commit_sha,
+    );
     expect(
       git(repository, "status", "--porcelain=v1", "--untracked-files=all"),
-    ).toBe(statusBefore);
+    ).toBe("M  ignored.txt");
+    expect(readFileSync(join(repository, "ignored.txt"), "utf8")).toBe(
+      "preserve staged user work\n",
+    );
     expect(readdirSync(worktreeRoot)).toEqual([]);
 
     const calls = readFileSync(logPath, "utf8")
@@ -900,6 +1036,8 @@ describe("daily Git automation", () => {
       "run list",
       "run watch",
       "pr checks",
+      "pr view",
+      "api graphql",
       "pr view",
       "pr merge",
       "pr view",
@@ -1148,66 +1286,366 @@ describe("daily Git automation", () => {
     expect(readdirSync(worktreeRoot)).toEqual([]);
   }, 20_000);
 
-  it.skipIf(process.platform !== "win32")(
-    "preserves a Git executable-mode-only change in the automation commit",
-    () => {
-      const { root, repository, worktreeRoot, receiptRoot } =
-        createRepository();
-      const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
-      const configPath = writeConfig(
-        root,
+  it("blocks merge when the PR has no approved review", () => {
+    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
+    const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
+        },
+      },
+    );
+    writeFileSync(join(repository, "src", "app.txt"), "needs review\n");
+
+    const execution = spawnSync(
+      process.execPath,
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "review-required",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FAKE_GH_LOG: logPath,
+          FAKE_GH_REVIEW_STATE: "APPROVED",
+          FAKE_GH_REVIEW_DECISION: "REVIEW_REQUIRED",
+          FAKE_GH_REQUIRED_APPROVALS: "2",
+        },
+      },
+    );
+
+    expect(execution.status).toBe(2);
+    expect(JSON.parse(execution.stdout)).toMatchObject({
+      status: "blocked",
+      summary: "pull_request_review_required",
+    });
+    const calls = readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(calls.map((args) => args.slice(0, 2).join(" "))).not.toContain(
+      "pr merge",
+    );
+  }, 20_000);
+
+  it("blocks merge when the PR has unresolved review feedback", () => {
+    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
+    const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
+        },
+      },
+    );
+    writeFileSync(join(repository, "src", "app.txt"), "unresolved feedback\n");
+
+    const execution = spawnSync(
+      process.execPath,
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "feedback-required",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FAKE_GH_LOG: logPath,
+          FAKE_GH_UNRESOLVED: "true",
+        },
+      },
+    );
+
+    expect(execution.status).toBe(2);
+    expect(JSON.parse(execution.stdout)).toMatchObject({
+      status: "blocked",
+      summary: "pull_request_unresolved_feedback",
+    });
+    const calls = readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(calls.map((args) => args.slice(0, 2).join(" "))).not.toContain(
+      "pr merge",
+    );
+  }, 20_000);
+
+  it("requires a configured deployment readback before cleanup", () => {
+    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
+    const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        deployment: {
+          mode: "required",
+          command: process.execPath,
+          args: ["-e", "process.exit(9)"],
+        },
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
+        },
+      },
+    );
+    writeFileSync(join(repository, "src", "app.txt"), "deployment readback\n");
+
+    const execution = spawnSync(
+      process.execPath,
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "deployment-required",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FAKE_GH_LOG: logPath,
+          FAKE_GH_MERGE_SHA_FILE: join(root, "merge-sha.txt"),
+        },
+      },
+    );
+
+    expect(execution.status).toBe(2);
+    expect(JSON.parse(execution.stdout)).toMatchObject({
+      status: "blocked",
+      summary: "deployment_readback_failed",
+      artifacts: { remote_branch_cleanup: "retained" },
+    });
+    expect(
+      git(
         repository,
-        worktreeRoot,
-        receiptRoot,
-        {
-          gitIdentity: {
-            name: "automation[bot]",
-            email: "automation@example.invalid",
-          },
-          github: {
-            command: process.execPath,
-            prefixArgs: [fakeGitHub],
-            repository: "owner/repository",
-            qualityWorkflow: "quality.yml",
-            requiredChecks: ["quality / root", "quality / outreach"],
-            mergeMethod: "merge",
-            mergePollAttempts: 2,
-            mergePollIntervalMs: 0,
-          },
-        },
-      );
-      git(repository, "update-index", "--chmod=+x", "src/app.txt");
+        "ls-remote",
+        "--heads",
+        "origin",
+        "automation/deployment-required",
+      ),
+    ).not.toBe("");
+  }, 20_000);
 
-      const execution = spawnSync(
-        process.execPath,
-        [SCRIPT, "--config", configPath, "--execute", "--run-id", "mode-only"],
-        {
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            FAKE_GH_LOG: logPath,
-            FAKE_GH_FAIL_COMMAND: "run watch",
-          },
+  it("blocks main sync when the original branch drifts after merge", () => {
+    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
+    const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
         },
-      );
+      },
+    );
+    writeFileSync(join(repository, "src", "app.txt"), "main drift\n");
+    const headBefore = git(repository, "rev-parse", "HEAD");
 
-      expect(execution.status).toBe(2);
-      expect(JSON.parse(execution.stdout)).toMatchObject({
-        status: "blocked",
-        artifacts: { changed_paths: ["src/app.txt"] },
-      });
-      expect(
-        git(
-          join(root, "origin.git"),
-          "ls-tree",
-          "refs/heads/automation/mode-only",
-          "--",
-          "src/app.txt",
-        ),
-      ).toMatch(/^100755\s+blob\s/u);
-    },
-    20_000,
-  );
+    const execution = spawnSync(
+      process.execPath,
+      [SCRIPT, "--config", configPath, "--execute", "--run-id", "main-drift"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FAKE_GH_LOG: logPath,
+          FAKE_GH_MERGE_SHA_FILE: join(root, "merge-sha.txt"),
+          FAKE_GH_DRIFT_MAIN_REPO: repository,
+        },
+      },
+    );
+
+    expect(execution.status).toBe(2);
+    expect(JSON.parse(execution.stdout)).toMatchObject({
+      status: "blocked",
+      summary: "original_main_head_drift",
+    });
+    expect(git(repository, "rev-parse", "HEAD")).not.toBe(headBefore);
+    expect(
+      git(
+        repository,
+        "ls-remote",
+        "--heads",
+        "origin",
+        "automation/main-drift",
+      ),
+    ).not.toBe("");
+  }, 20_000);
+
+  it("restores the original index when main ref update fails", () => {
+    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
+    const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
+    const gitShim = writeGitShim(root);
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          review: { requiredApprovals: 1, requireNoUnresolvedFeedback: true },
+          mergeMethod: "merge",
+          mergePollAttempts: 1,
+          mergePollIntervalMs: 0,
+        },
+      },
+    );
+    writeFileSync(join(repository, "src", "app.txt"), "restore index\n");
+    writeFileSync(join(repository, "ignored.txt"), "staged user work\n");
+    git(repository, "add", "ignored.txt");
+    const headBefore = git(repository, "rev-parse", "HEAD");
+    const statusBefore = git(
+      repository,
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all",
+    );
+
+    const execution = spawnSync(
+      process.execPath,
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "sync-rollback",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...gitShim.env({ FAIL_UPDATE_REF: "1" }),
+          FAKE_GH_LOG: logPath,
+          FAKE_GH_MERGE_SHA_FILE: join(root, "merge-sha.txt"),
+        },
+      },
+    );
+
+    expect(execution.status).toBe(2);
+    expect(JSON.parse(execution.stdout)).toMatchObject({
+      status: "blocked",
+      summary: "command_failed",
+    });
+    expect(git(repository, "rev-parse", "HEAD")).toBe(headBefore);
+    expect(
+      git(repository, "status", "--porcelain=v1", "--untracked-files=all"),
+    ).toBe(statusBefore);
+  }, 20_000);
+
+  it("preserves a Git executable-mode-only change in the automation commit", () => {
+    const { root, repository, worktreeRoot, receiptRoot } = createRepository();
+    const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        gitIdentity: {
+          name: "automation[bot]",
+          email: "automation@example.invalid",
+        },
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          mergeMethod: "merge",
+          mergePollAttempts: 2,
+          mergePollIntervalMs: 0,
+        },
+      },
+    );
+    git(repository, "update-index", "--chmod=+x", "src/app.txt");
+
+    const execution = spawnSync(
+      process.execPath,
+      [SCRIPT, "--config", configPath, "--execute", "--run-id", "mode-only"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FAKE_GH_LOG: logPath,
+          FAKE_GH_FAIL_COMMAND: "run watch",
+        },
+      },
+    );
+
+    expect(execution.status).toBe(2);
+    expect(JSON.parse(execution.stdout)).toMatchObject({
+      status: "blocked",
+      artifacts: { changed_paths: ["src/app.txt"] },
+    });
+    expect(
+      git(
+        join(root, "origin.git"),
+        "ls-tree",
+        "refs/heads/automation/mode-only",
+        "--",
+        "src/app.txt",
+      ),
+    ).toMatch(/^100755\s+blob\s/u);
+  }, 20_000);
 
   it("stops before push when GitHub auto-merge is not enabled", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();
@@ -1304,11 +1742,103 @@ describe("daily Git automation", () => {
       { encoding: "utf8" },
     );
 
-    expect(execution.status).toBe(0);
+    expect(execution.status, execution.stdout).toBe(0);
     const result = JSON.parse(execution.stdout);
     expect(result.artifacts.base_sha).toBe(latestRemoteSha);
     expect(result.artifacts.changed_paths).toEqual(["src/new.txt"]);
   }, 15_000);
+
+  it("validates an empty remote as an initializable baseline without publishing main", () => {
+    const { root, repository, worktreeRoot, receiptRoot } = createRepository({
+      pushInitial: false,
+    });
+    const configPath = writeConfig(root, repository, worktreeRoot, receiptRoot);
+    writeFileSync(join(repository, "src", "new.txt"), "local addition\n");
+
+    const execution = spawnSync(
+      process.execPath,
+      [SCRIPT, "--config", configPath, "--dry-run", "--run-id", "empty-remote"],
+      { encoding: "utf8" },
+    );
+
+    expect(execution.status, execution.stdout).toBe(0);
+    const result = JSON.parse(execution.stdout);
+    expect(result).toMatchObject({
+      status: "verified",
+      artifacts: {
+        base_ref: "origin/main",
+        remote_baseline: {
+          state: "empty_initializable",
+          bootstrap: "required_on_execute",
+        },
+      },
+    });
+    expect(git(repository, "ls-remote", "--heads", "origin", "main")).toBe("");
+  }, 15_000);
+
+  it("bootstraps an empty remote before completing the configured delivery", () => {
+    const { root, repository, worktreeRoot, receiptRoot } = createRepository({
+      pushInitial: false,
+    });
+    const { scriptPath: fakeGitHub, logPath } = writeFakeGitHub(root);
+    const configPath = writeConfig(
+      root,
+      repository,
+      worktreeRoot,
+      receiptRoot,
+      {
+        gitIdentity: {
+          name: "automation[bot]",
+          email: "automation@example.invalid",
+        },
+        github: {
+          command: process.execPath,
+          prefixArgs: [fakeGitHub],
+          repository: "owner/repository",
+          qualityWorkflow: "quality.yml",
+          requiredChecks: ["quality / root", "quality / outreach"],
+          mergeMethod: "merge",
+          mergePollAttempts: 2,
+          mergePollIntervalMs: 0,
+        },
+      },
+    );
+    writeFileSync(join(repository, "src", "new.txt"), "deliver this\n");
+
+    const execution = spawnSync(
+      process.execPath,
+      [
+        SCRIPT,
+        "--config",
+        configPath,
+        "--execute",
+        "--run-id",
+        "empty-bootstrap",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FAKE_GH_LOG: logPath,
+          FAKE_GH_MERGE_SHA_FILE: join(root, "merge-sha.txt"),
+        },
+      },
+    );
+
+    expect(execution.status, execution.stdout).toBe(0);
+    const result = JSON.parse(execution.stdout);
+    expect(result).toMatchObject({
+      status: "verified",
+      summary: "merge_verified",
+      artifacts: {
+        remote_baseline: { state: "bootstrapped", bootstrap: "verified" },
+        cleanup_status: "removed",
+      },
+    });
+    expect(git(repository, "ls-remote", "--heads", "origin", "main")).toContain(
+      result.artifacts.merge_commit_sha,
+    );
+  }, 20_000);
 
   it("stops before creating a worktree when local and remote changed the same path", () => {
     const { root, repository, worktreeRoot, receiptRoot } = createRepository();

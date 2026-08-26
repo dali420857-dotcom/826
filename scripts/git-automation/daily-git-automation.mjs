@@ -118,6 +118,44 @@ function loadConfig(configPath) {
   if (!loaded.remote || !loaded.baseBranch) {
     throw new AutomationError("remote_and_base_branch_required");
   }
+  const deployment = loaded.deployment;
+  if (
+    !deployment ||
+    !["required", "not_applicable"].includes(deployment.mode)
+  ) {
+    throw new AutomationError("invalid_deployment_mode");
+  }
+  if (deployment.mode === "not_applicable") {
+    if (typeof deployment.reason !== "string" || !deployment.reason.trim()) {
+      throw new AutomationError("deployment_reason_required");
+    }
+  } else if (
+    typeof deployment.command !== "string" ||
+    !deployment.command.trim() ||
+    (deployment.args !== undefined && !Array.isArray(deployment.args))
+  ) {
+    throw new AutomationError("deployment_readback_configuration_missing");
+  }
+  const review = loaded.github?.review || {};
+  const requiredApprovals = Number(review.requiredApprovals ?? 1);
+  if (
+    !Number.isInteger(requiredApprovals) ||
+    requiredApprovals < 0 ||
+    typeof (review.requireNoUnresolvedFeedback ?? true) !== "boolean"
+  ) {
+    throw new AutomationError("invalid_review_configuration");
+  }
+  loaded.github = loaded.github
+    ? {
+        ...loaded.github,
+        review: {
+          ...review,
+          requiredApprovals,
+          requireNoUnresolvedFeedback:
+            review.requireNoUnresolvedFeedback ?? true,
+        },
+      }
+    : loaded.github;
   if (
     !Number.isInteger(loaded.snapshotStabilityDelayMs) ||
     loaded.snapshotStabilityDelayMs < 0 ||
@@ -173,6 +211,27 @@ function verifyInternalConfigTrust(config, baseRef) {
     });
   }
 
+  // An approved bootstrap/reconciliation commit may intentionally update the
+  // delivery config before its first PR. Trust it only when Git says the
+  // working-tree path is equivalent to local HEAD. Comparing raw `git show`
+  // bytes to the working-tree file is incorrect on Windows: Git may apply an
+  // LF-to-CRLF checkout conversion without creating a real config change.
+  // Comparing against HEAD catches both staged and unstaged config edits.
+  if (
+    gitSucceeds(
+      config.repositoryRoot,
+      "diff",
+      "--quiet",
+      "HEAD",
+      "--",
+      relativeConfigPath,
+    )
+  ) {
+    return;
+  }
+
+  const localConfig = readFileSync(config.configPath);
+
   let remoteConfig;
   try {
     remoteConfig = gitNull(
@@ -187,7 +246,6 @@ function verifyInternalConfigTrust(config, baseRef) {
     });
   }
 
-  const localConfig = readFileSync(config.configPath);
   if (!Buffer.isBuffer(remoteConfig) || !remoteConfig.equals(localConfig)) {
     throw new AutomationError("config_modified_from_remote_base", {
       config_path: relativeConfigPath,
@@ -327,6 +385,83 @@ function repositoryRelation(repositoryRoot, baseRef) {
   return { state: "diverged", head, base };
 }
 
+function resolveRemoteBaseline(config, options) {
+  const baseRef = `${config.remote}/${config.baseBranch}`;
+  try {
+    git(
+      config.repositoryRoot,
+      "fetch",
+      "--no-tags",
+      config.remote,
+      config.baseBranch,
+    );
+    const baseSha = git(config.repositoryRoot, "rev-parse", baseRef);
+    return {
+      state: "present",
+      bootstrap: "not_required",
+      base_ref: baseRef,
+      base_sha: baseSha,
+      checkout_ref: baseRef,
+      relation: repositoryRelation(config.repositoryRoot, baseRef),
+    };
+  } catch (fetchError) {
+    if (
+      !(fetchError instanceof AutomationError) ||
+      fetchError.code !== "command_failed"
+    ) {
+      throw fetchError;
+    }
+
+    // A failed fetch may mean an empty repository, but it can also mean an
+    // unavailable remote, missing base branch, or auth failure. Only a fresh
+    // successful readback of *no refs at all* permits the bootstrap route.
+    const remoteRefs = git(config.repositoryRoot, "ls-remote", config.remote);
+    if (remoteRefs !== "") throw fetchError;
+
+    const sourceHead = git(config.repositoryRoot, "rev-parse", "HEAD");
+    if (!options.execute) {
+      return {
+        state: "empty_initializable",
+        bootstrap: "required_on_execute",
+        base_ref: baseRef,
+        base_sha: null,
+        checkout_ref: "HEAD",
+        relation: { state: "equal", head: sourceHead, base: null },
+      };
+    }
+
+    git(
+      config.repositoryRoot,
+      "push",
+      config.remote,
+      `HEAD:refs/heads/${config.baseBranch}`,
+    );
+    git(
+      config.repositoryRoot,
+      "fetch",
+      "--no-tags",
+      config.remote,
+      config.baseBranch,
+    );
+    const baseSha = git(config.repositoryRoot, "rev-parse", baseRef);
+    if (baseSha !== sourceHead) {
+      throw new AutomationError("remote_bootstrap_readback_mismatch", {
+        expected: sourceHead,
+        observed: baseSha,
+        base_ref: baseRef,
+      });
+    }
+    return {
+      state: "bootstrapped",
+      bootstrap: "verified",
+      base_ref: baseRef,
+      base_sha: baseSha,
+      checkout_ref: baseRef,
+      relation: repositoryRelation(config.repositoryRoot, baseRef),
+    };
+  }
+}
+
 function sourceManifest(config, baseRef, relation) {
   const dirtyTracked = splitNull(
     gitNull(
@@ -444,11 +579,20 @@ function copyManifest(config, manifest, worktreePath) {
 }
 
 function runValidationCommands(config, worktreePath) {
+  const validationCwd =
+    config.validationCwd === "source" ? config.repositoryRoot : worktreePath;
+  if (
+    config.validationCwd !== undefined &&
+    config.validationCwd !== "source" &&
+    config.validationCwd !== "worktree"
+  ) {
+    throw new AutomationError("invalid_validation_cwd");
+  }
   for (const command of config.validationCommands) {
     if (!command || typeof command.command !== "string") {
       throw new AutomationError("invalid_validation_command");
     }
-    run(command.command, command.args || [], worktreePath);
+    run(command.command, command.args || [], validationCwd);
   }
 }
 
@@ -718,6 +862,19 @@ function parseProviderJson(raw, code) {
   }
 }
 
+function recordPhase(config, artifacts, phase, details = {}) {
+  const entry = {
+    phase,
+    recorded_at: new Date().toISOString(),
+    ...details,
+  };
+  artifacts.phases = [...(artifacts.phases || []), entry];
+  updateActiveReceipt(config, artifacts.run_id, phase, {
+    ...details,
+    phases: artifacts.phases,
+  });
+}
+
 function verifyGitHubGates(config, worktreePath, artifacts) {
   const github = config.github;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(github?.repository || "")) {
@@ -760,13 +917,113 @@ function verifyGitHubGates(config, worktreePath, artifacts) {
       checks: missing,
     });
   }
-  const approvals =
-    protection.required_pull_request_reviews?.required_approving_review_count ||
+  const configuredApprovals =
+    protection.required_pull_request_reviews?.required_approving_review_count ??
     0;
-  if (approvals !== 0) {
-    throw new AutomationError("manual_approval_required", { approvals });
-  }
+  artifacts.branch_protection_required_approvals = configuredApprovals;
   artifacts.github_gates_verified = true;
+}
+
+function verifyPullRequestReview(config, worktreePath, artifacts) {
+  const github = config.github;
+  const reviewConfig = github.review || {};
+  const requiredApprovals = Math.max(
+    reviewConfig.requiredApprovals ?? 1,
+    artifacts.branch_protection_required_approvals ?? 0,
+  );
+  const readback = parseProviderJson(
+    provider(
+      config,
+      worktreePath,
+      "pr",
+      "view",
+      String(artifacts.pr_number),
+      "--json",
+      "reviewDecision,reviews",
+    ),
+    "pull_request_review_readback_invalid",
+  );
+  if (!Array.isArray(readback.reviews)) {
+    throw new AutomationError("pull_request_review_readback_invalid");
+  }
+  const latestByReviewer = new Map();
+  for (const review of readback.reviews) {
+    const reviewer = review?.author?.login || review?.author?.id;
+    if (typeof reviewer !== "string" || !reviewer) {
+      throw new AutomationError("pull_request_review_readback_invalid");
+    }
+    latestByReviewer.set(reviewer, review);
+  }
+  const approvals = [...latestByReviewer.values()].filter(
+    (review) => review?.state === "APPROVED",
+  ).length;
+  const decision = readback.reviewDecision || null;
+  if (decision === "CHANGES_REQUESTED") {
+    throw new AutomationError("pull_request_changes_requested", {
+      review_decision: decision,
+    });
+  }
+  if (requiredApprovals > 0 && decision !== "APPROVED") {
+    throw new AutomationError("pull_request_review_required", {
+      approvals,
+      required_approvals: requiredApprovals,
+      review_decision: decision,
+    });
+  }
+  if (approvals < requiredApprovals) {
+    throw new AutomationError("pull_request_review_required", {
+      approvals,
+      required_approvals: requiredApprovals,
+      review_decision: decision,
+    });
+  }
+
+  let unresolvedThreads = [];
+  if (reviewConfig.requireNoUnresolvedFeedback !== false) {
+    const [owner, name] = String(github.repository || "").split("/");
+    if (!owner || !name) {
+      throw new AutomationError("invalid_github_repository");
+    }
+    const threadReadback = parseProviderJson(
+      provider(
+        config,
+        worktreePath,
+        "api",
+        "graphql",
+        "-F",
+        `owner=${owner}`,
+        "-F",
+        `repo=${name}`,
+        "-F",
+        `number=${artifacts.pr_number}`,
+        "-f",
+        "query=query($owner:String!, $repo:String!, $number:Int!) { repository(owner:$owner, name:$repo) { pullRequest(number:$number) { reviewThreads(first:100) { nodes { isResolved } pageInfo { hasNextPage } } } } }",
+      ),
+      "pull_request_review_threads_readback_invalid",
+    );
+    const connection =
+      threadReadback?.data?.repository?.pullRequest?.reviewThreads;
+    if (!connection || !Array.isArray(connection.nodes)) {
+      throw new AutomationError("pull_request_review_threads_readback_invalid");
+    }
+    if (connection.pageInfo?.hasNextPage === true) {
+      throw new AutomationError("pull_request_review_threads_incomplete");
+    }
+    unresolvedThreads = connection.nodes.filter(
+      (thread) => thread?.isResolved !== true,
+    );
+    if (unresolvedThreads.length > 0) {
+      throw new AutomationError("pull_request_unresolved_feedback", {
+        unresolved_threads: unresolvedThreads.length,
+      });
+    }
+  }
+  artifacts.review_readback = {
+    approvals,
+    required_approvals: requiredApprovals,
+    review_decision: decision,
+    unresolved_threads: unresolvedThreads.length,
+  };
 }
 
 function verifyPullRequestRefs(config, worktreePath, artifacts, phase) {
@@ -799,6 +1056,353 @@ function verifyPullRequestRefs(config, worktreePath, artifacts, phase) {
   return readback;
 }
 
+function interpolateDeploymentValue(value, artifacts) {
+  return String(value)
+    .replaceAll("{run_id}", artifacts.run_id)
+    .replaceAll("{merge_commit_sha}", artifacts.merge_commit_sha || "")
+    .replaceAll("{base_branch}", artifacts.base_branch || "");
+}
+
+function runDeploymentReadback(config, worktreePath, artifacts) {
+  const deployment = config.deployment;
+  if (deployment.mode === "not_applicable") {
+    artifacts.deployment_readback = {
+      mode: "not_applicable",
+      reason: deployment.reason,
+      status: "not_applicable",
+    };
+    return;
+  }
+  const args = (deployment.args || []).map((value) =>
+    interpolateDeploymentValue(value, artifacts),
+  );
+  try {
+    run(deployment.command, args, worktreePath);
+  } catch (error) {
+    throw new AutomationError("deployment_readback_failed", {
+      command: deployment.command,
+      args,
+      cause: error instanceof AutomationError ? error.code : "unknown",
+    });
+  }
+  artifacts.deployment_readback = {
+    mode: "required",
+    command: [deployment.command, ...args],
+    status: "verified",
+  };
+}
+
+function pathSnapshot(path) {
+  if (!existsSync(path)) return { exists: false };
+  const stat = lstatSync(path);
+  if (stat.isDirectory()) {
+    return {
+      exists: true,
+      type: "directory",
+      mode: stat.mode & 0o7777,
+    };
+  }
+  return {
+    exists: true,
+    type: stat.isSymbolicLink() ? "symlink" : "file",
+    mode: stat.mode & 0o7777,
+    sha256: hashFile(path),
+  };
+}
+
+function protectedPathSnapshots(config, currentDirtyPaths) {
+  return currentDirtyPaths
+    .filter((path) => matchesScope(path, config.ignoredDirtyPaths))
+    .map((path) => ({
+      path,
+      state: pathSnapshot(join(config.repositoryRoot, path)),
+    }));
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function manifestMatchesWorkingTree(config, manifest) {
+  for (const item of manifest.files) {
+    const absolute = join(config.repositoryRoot, item.path);
+    if (!existsSync(absolute) || hashFile(absolute) !== item.sha256)
+      return false;
+    const stat = lstatSync(absolute);
+    if ((stat.mode & 0o7777) !== item.mode) return false;
+  }
+  return manifest.deleted_paths.every(
+    (path) => !existsSync(join(config.repositoryRoot, path)),
+  );
+}
+
+function verifyMergeTreeSnapshot(repositoryRoot, mergeSha, manifest) {
+  if (!/^[0-9a-f]{40}$/u.test(mergeSha)) {
+    throw new AutomationError("merge_commit_sha_invalid", {
+      merge_commit_sha: mergeSha,
+    });
+  }
+  try {
+    git(repositoryRoot, "cat-file", "-e", `${mergeSha}^{commit}`);
+  } catch {
+    throw new AutomationError("merge_commit_not_present_locally", {
+      merge_commit_sha: mergeSha,
+    });
+  }
+  for (const item of manifest.files) {
+    const line = git(
+      repositoryRoot,
+      "ls-tree",
+      "-r",
+      mergeSha,
+      "--",
+      item.path,
+    );
+    const fields = line.split(/\s+/u);
+    if (fields.length < 4 || fields[0] !== item.git_mode) {
+      throw new AutomationError("merge_tree_snapshot_mismatch", {
+        path: item.path,
+      });
+    }
+    const blob = gitNull(repositoryRoot, "show", `${mergeSha}:${item.path}`);
+    if (item.git_mode === "120000") {
+      if (
+        blob.toString("utf8") !== readlinkSync(join(repositoryRoot, item.path))
+      ) {
+        throw new AutomationError("merge_tree_snapshot_mismatch", {
+          path: item.path,
+        });
+      }
+    } else if (
+      createHash("sha256").update(blob).digest("hex") !== item.sha256
+    ) {
+      throw new AutomationError("merge_tree_snapshot_mismatch", {
+        path: item.path,
+      });
+    }
+  }
+  for (const path of manifest.deleted_paths) {
+    const line = git(repositoryRoot, "ls-tree", "-r", mergeSha, "--", path);
+    if (line) {
+      throw new AutomationError("merge_tree_deleted_path_present", { path });
+    }
+  }
+}
+
+function syncOriginalMain(config, artifacts) {
+  const currentBranch = git(config.repositoryRoot, "branch", "--show-current");
+  if (currentBranch !== config.baseBranch) {
+    throw new AutomationError("original_main_branch_drift", {
+      expected: config.baseBranch,
+      observed: currentBranch || null,
+    });
+  }
+  const currentHead = git(config.repositoryRoot, "rev-parse", "HEAD");
+  if (currentHead !== artifacts.source_head_sha) {
+    throw new AutomationError("original_main_head_drift", {
+      expected: artifacts.source_head_sha,
+      observed: currentHead,
+    });
+  }
+  const currentDirtyPaths = dirtyPaths(config.repositoryRoot);
+  if (!sameJson(currentDirtyPaths, artifacts.source_dirty_paths)) {
+    throw new AutomationError("original_main_dirty_manifest_drift", {
+      expected: artifacts.source_dirty_paths,
+      observed: currentDirtyPaths,
+    });
+  }
+  const currentProtected = protectedPathSnapshots(config, currentDirtyPaths);
+  if (!sameJson(currentProtected, artifacts.protected_dirty_paths)) {
+    throw new AutomationError("original_main_protected_path_drift");
+  }
+  if (!manifestMatchesWorkingTree(config, artifacts.source_manifest)) {
+    throw new AutomationError("original_main_manifest_hash_drift");
+  }
+
+  const baseRef = `${config.remote}/${config.baseBranch}`;
+  git(
+    config.repositoryRoot,
+    "fetch",
+    "--no-tags",
+    config.remote,
+    config.baseBranch,
+  );
+  const remoteBaseSha = git(config.repositoryRoot, "rev-parse", baseRef);
+  if (remoteBaseSha !== artifacts.merge_commit_sha) {
+    throw new AutomationError("base_branch_merge_mismatch", {
+      expected: artifacts.merge_commit_sha,
+      observed: remoteBaseSha,
+    });
+  }
+  verifyMergeTreeSnapshot(
+    config.repositoryRoot,
+    artifacts.merge_commit_sha,
+    artifacts.source_manifest,
+  );
+  const snapshotPaths = [
+    ...artifacts.source_manifest.files.map((item) => item.path),
+    ...artifacts.source_manifest.deleted_paths,
+  ].sort();
+  const mergeChangedPaths = splitNull(
+    gitNull(
+      config.repositoryRoot,
+      "diff",
+      "--name-only",
+      "-z",
+      artifacts.source_head_sha,
+      artifacts.merge_commit_sha,
+    ),
+  ).sort();
+  if (!sameJson(mergeChangedPaths, snapshotPaths)) {
+    throw new AutomationError("original_main_merge_scope_drift", {
+      expected: snapshotPaths,
+      observed: mergeChangedPaths,
+    });
+  }
+  const headRef = git(config.repositoryRoot, "symbolic-ref", "-q", "HEAD");
+  if (headRef !== `refs/heads/${config.baseBranch}`) {
+    throw new AutomationError("original_main_branch_drift", {
+      expected: `refs/heads/${config.baseBranch}`,
+      observed: headRef,
+    });
+  }
+  const rawIndexPath = git(
+    config.repositoryRoot,
+    "rev-parse",
+    "--git-path",
+    "index",
+  );
+  const indexPath = resolve(config.repositoryRoot, rawIndexPath);
+  const indexExisted = existsSync(indexPath);
+  const indexBackup = indexExisted ? readFileSync(indexPath) : null;
+  let refUpdated = false;
+  let afterDirtyPaths;
+  try {
+    if (snapshotPaths.length > 0) {
+      git(config.repositoryRoot, "add", "-A", "--", ...snapshotPaths);
+      for (const path of snapshotPaths) {
+        if (
+          !gitSucceeds(
+            config.repositoryRoot,
+            "diff",
+            "--cached",
+            "--quiet",
+            artifacts.merge_commit_sha,
+            "--",
+            path,
+          )
+        ) {
+          throw new AutomationError("original_main_index_snapshot_mismatch", {
+            path,
+          });
+        }
+      }
+    }
+    git(
+      config.repositoryRoot,
+      "update-ref",
+      headRef,
+      artifacts.merge_commit_sha,
+      currentHead,
+    );
+    refUpdated = true;
+    afterDirtyPaths = dirtyPaths(config.repositoryRoot);
+    const expectedDirtyPaths = artifacts.source_dirty_paths.filter(
+      (path) => !snapshotPaths.includes(path),
+    );
+    if (!sameJson(afterDirtyPaths, expectedDirtyPaths)) {
+      throw new AutomationError("original_main_sync_dirty", {
+        expected: expectedDirtyPaths,
+        observed: afterDirtyPaths,
+      });
+    }
+    const afterProtected = protectedPathSnapshots(config, afterDirtyPaths);
+    if (!sameJson(afterProtected, artifacts.protected_dirty_paths)) {
+      throw new AutomationError("original_main_protected_path_drift");
+    }
+  } catch (error) {
+    let rollbackFailed = false;
+    if (refUpdated) {
+      try {
+        git(
+          config.repositoryRoot,
+          "update-ref",
+          headRef,
+          currentHead,
+          artifacts.merge_commit_sha,
+        );
+      } catch {
+        rollbackFailed = true;
+      }
+    }
+    if (indexExisted && indexBackup) writeFileSync(indexPath, indexBackup);
+    else rmSync(indexPath, { force: true });
+    if (rollbackFailed) {
+      throw new AutomationError("original_main_sync_rollback_failed", {
+        cause: error instanceof AutomationError ? error.code : "unknown",
+      });
+    }
+    throw error;
+  }
+  artifacts.main_sync = {
+    branch: config.baseBranch,
+    head_before: currentHead,
+    head_after: git(config.repositoryRoot, "rev-parse", "HEAD"),
+    remote_base_sha: remoteBaseSha,
+    dirty_paths_before: artifacts.source_dirty_paths,
+    dirty_paths_after: afterDirtyPaths,
+    snapshot_tree_verified: true,
+  };
+}
+
+function cleanupRemoteBranch(config, worktreePath, artifacts) {
+  const branch = artifacts.branch;
+  const beforeCleanup = remoteBranchExists(
+    config.repositoryRoot,
+    config.remote,
+    branch,
+  );
+  if (beforeCleanup.state === "unknown") {
+    artifacts.remote_branch_cleanup = "unknown";
+    throw new AutomationError("remote_branch_status_unknown", {
+      phase: "before_delete",
+      branch,
+      ...beforeCleanup,
+    });
+  }
+  if (beforeCleanup.state === "present") {
+    artifacts.remote_branch_cleanup = "deletion_requested";
+    try {
+      git(config.repositoryRoot, "push", config.remote, "--delete", branch);
+    } catch (error) {
+      artifacts.remote_branch_cleanup = "unknown";
+      throw new AutomationError("remote_branch_cleanup_unknown", {
+        branch,
+        cause: error instanceof AutomationError ? error.code : "unknown",
+      });
+    }
+  }
+  const afterCleanup = remoteBranchExists(
+    config.repositoryRoot,
+    config.remote,
+    branch,
+  );
+  if (afterCleanup.state === "unknown") {
+    artifacts.remote_branch_cleanup = "unknown";
+    throw new AutomationError("remote_branch_status_unknown", {
+      phase: "after_delete",
+      branch,
+      ...afterCleanup,
+    });
+  }
+  if (afterCleanup.state === "present") {
+    artifacts.remote_branch_cleanup = "retained";
+    throw new AutomationError("remote_branch_cleanup_pending", { branch });
+  }
+  artifacts.remote_branch_cleanup =
+    beforeCleanup.state === "present" ? "deleted" : "already_absent";
+}
+
 function completeGitHubFlow(config, worktreePath, artifacts) {
   const github = config.github;
   const branch = `${config.branchPrefix || "automation/"}${artifacts.run_id}`;
@@ -827,18 +1431,21 @@ function completeGitHubFlow(config, worktreePath, artifacts) {
     `automation-run:${artifacts.run_id}`,
   );
   artifacts.commit_sha = git(worktreePath, "rev-parse", "HEAD");
-  updateActiveReceipt(config, artifacts.run_id, "push_pending", {
+  recordPhase(config, artifacts, "commit_complete", {
+    commit_sha: artifacts.commit_sha,
+  });
+  recordPhase(config, artifacts, "push_pending", {
     branch,
     commit_sha: artifacts.commit_sha,
     base_branch: config.baseBranch,
   });
   git(worktreePath, "push", "--set-upstream", config.remote, branch);
   artifacts.remote_branch_cleanup = "retained";
-  updateActiveReceipt(config, artifacts.run_id, "push_complete", {
+  recordPhase(config, artifacts, "push_complete", {
     remote_branch_cleanup: "retained",
   });
 
-  updateActiveReceipt(config, artifacts.run_id, "pr_create_pending", {});
+  recordPhase(config, artifacts, "pr_create_pending");
   const prUrl = provider(
     config,
     worktreePath,
@@ -861,7 +1468,7 @@ function completeGitHubFlow(config, worktreePath, artifacts) {
   }
   artifacts.pr_number = prNumber;
   artifacts.pr_url = prUrl;
-  updateActiveReceipt(config, artifacts.run_id, "pr_created", {
+  recordPhase(config, artifacts, "pr_created", {
     pr_number: prNumber,
     pr_url: prUrl,
   });
@@ -904,6 +1511,15 @@ function completeGitHubFlow(config, worktreePath, artifacts) {
   artifacts.quality_run_id = qualityRunId;
   provider(config, worktreePath, "run", "watch", qualityRunId, "--exit-status");
   provider(config, worktreePath, "pr", "checks", String(prNumber), "--watch");
+  recordPhase(config, artifacts, "ci_verified", {
+    quality_run_id: qualityRunId,
+  });
+
+  recordPhase(config, artifacts, "review_pending");
+  verifyPullRequestReview(config, worktreePath, artifacts);
+  recordPhase(config, artifacts, "review_verified", {
+    review_readback: artifacts.review_readback,
+  });
 
   // The provider must prove that the PR still points at the exact commit we
   // staged and at the configured base before we request a merge.
@@ -913,6 +1529,7 @@ function completeGitHubFlow(config, worktreePath, artifacts) {
   if (!new Set(["merge", "squash", "rebase"]).has(mergeMethod)) {
     throw new AutomationError("invalid_merge_method");
   }
+  recordPhase(config, artifacts, "merge_pending");
   provider(
     config,
     worktreePath,
@@ -968,52 +1585,10 @@ function completeGitHubFlow(config, worktreePath, artifacts) {
   }
   artifacts.merged_at = mergeReadback.mergedAt;
   artifacts.merge_commit_sha = mergeReadback.mergeCommit.oid;
-
-  const beforeCleanup = remoteBranchExists(
-    config.repositoryRoot,
-    config.remote,
-    branch,
-  );
-  if (beforeCleanup.state === "unknown") {
-    artifacts.remote_branch_cleanup = "unknown";
-    throw new AutomationError("remote_branch_status_unknown", {
-      phase: "before_delete",
-      branch,
-      ...beforeCleanup,
-    });
-  }
-  if (beforeCleanup.state === "present") {
-    artifacts.remote_branch_cleanup = "deletion_requested";
-    try {
-      git(config.repositoryRoot, "push", config.remote, "--delete", branch);
-    } catch (error) {
-      artifacts.remote_branch_cleanup = "unknown";
-      throw new AutomationError("remote_branch_cleanup_unknown", {
-        branch,
-        cause: error instanceof AutomationError ? error.code : "unknown",
-      });
-    }
-  }
-
-  const afterCleanup = remoteBranchExists(
-    config.repositoryRoot,
-    config.remote,
-    branch,
-  );
-  if (afterCleanup.state === "unknown") {
-    artifacts.remote_branch_cleanup = "unknown";
-    throw new AutomationError("remote_branch_status_unknown", {
-      phase: "after_delete",
-      branch,
-      ...afterCleanup,
-    });
-  }
-  if (afterCleanup.state === "present") {
-    artifacts.remote_branch_cleanup = "retained";
-    throw new AutomationError("remote_branch_cleanup_pending", { branch });
-  }
-  artifacts.remote_branch_cleanup =
-    beforeCleanup.state === "present" ? "deleted" : "already_absent";
+  recordPhase(config, artifacts, "merge_verified", {
+    merged_at: artifacts.merged_at,
+    merge_commit_sha: artifacts.merge_commit_sha,
+  });
 }
 
 function forbiddenSnapshotPaths(config, changedPaths) {
@@ -1239,6 +1814,13 @@ function execute(options, config) {
   if (resolve(repositoryRoot) !== resolve(config.repositoryRoot)) {
     throw new AutomationError("unexpected_repository_root");
   }
+  const originalBranch = git(config.repositoryRoot, "branch", "--show-current");
+  if (originalBranch !== config.baseBranch) {
+    throw new AutomationError("original_main_branch_drift", {
+      expected: config.baseBranch,
+      observed: originalBranch || null,
+    });
+  }
   if (pathInside(config.repositoryRoot, config.worktreeRoot)) {
     throw new AutomationError("worktree_root_must_be_external");
   }
@@ -1246,15 +1828,8 @@ function execute(options, config) {
     throw new AutomationError("receipt_root_must_be_external");
   }
 
-  const baseRef = `${config.remote}/${config.baseBranch}`;
-  git(
-    config.repositoryRoot,
-    "fetch",
-    "--no-tags",
-    config.remote,
-    config.baseBranch,
-  );
-  git(config.repositoryRoot, "rev-parse", "--verify", baseRef);
+  const remoteBaseline = resolveRemoteBaseline(config, options);
+  const baseRef = remoteBaseline.base_ref;
   if (options.execute) verifyInternalConfigTrust(config, baseRef);
 
   const unknownDirtyPaths = dirtyPaths(config.repositoryRoot).filter(
@@ -1267,6 +1842,8 @@ function execute(options, config) {
       paths: unknownDirtyPaths,
     });
   }
+  const sourceDirtyPaths = dirtyPaths(config.repositoryRoot);
+  const protectedDirtyPaths = protectedPathSnapshots(config, sourceDirtyPaths);
 
   const remoteReconciliation = options.execute
     ? reconcileExpiredRemoteArtifacts(config)
@@ -1280,7 +1857,7 @@ function execute(options, config) {
     });
   }
 
-  const relation = repositoryRelation(config.repositoryRoot, baseRef);
+  const relation = remoteBaseline.relation;
   if (relation.state === "diverged") {
     throw new AutomationError("local_and_remote_diverged", {
       local_head: relation.head,
@@ -1307,27 +1884,40 @@ function execute(options, config) {
     config_path: config.configPath,
     repository_root: config.repositoryRoot,
     base_ref: baseRef,
-    base_sha: git(config.repositoryRoot, "rev-parse", baseRef),
+    base_sha: remoteBaseline.base_sha,
+    remote_baseline: {
+      state: remoteBaseline.state,
+      bootstrap: remoteBaseline.bootstrap,
+    },
     source_relation: relation.state,
     source_head_sha: manifestStable.source_head_sha,
+    original_branch: originalBranch,
+    source_dirty_paths: sourceDirtyPaths,
+    protected_dirty_paths: protectedDirtyPaths,
+    source_manifest: manifestStable,
+    base_branch: config.baseBranch,
     worktree_path: worktreePath,
     manifest_sha256: manifestIdentity(manifestStable),
     changed: false,
     changed_paths: [],
     remote_reconciliation: remoteReconciliation,
     cleanup_status: "not_started",
+    phases: [],
   };
   let worktreeAdded = false;
   let primaryResult;
 
   try {
+    recordPhase(config, artifacts, "snapshot_started", {
+      manifest_sha256: artifacts.manifest_sha256,
+    });
     git(
       config.repositoryRoot,
       "worktree",
       "add",
       "--detach",
       worktreePath,
-      baseRef,
+      remoteBaseline.checkout_ref,
     );
     worktreeAdded = true;
     copyManifest(config, manifestStable, worktreePath);
@@ -1342,6 +1932,9 @@ function execute(options, config) {
       gitNull(worktreePath, "diff", "--cached", "--name-only", "-z"),
     ).sort();
     artifacts.changed = artifacts.changed_paths.length > 0;
+    recordPhase(config, artifacts, "snapshot_validated", {
+      changed_paths: artifacts.changed_paths,
+    });
     const forbiddenPaths = forbiddenSnapshotPaths(
       config,
       artifacts.changed_paths,
@@ -1361,9 +1954,30 @@ function execute(options, config) {
       });
     }
     runValidationCommands(config, worktreePath);
+    const manifestAfterValidation = sourceManifest(config, baseRef, relation);
+    if (
+      manifestIdentity(manifestStable) !==
+      manifestIdentity(manifestAfterValidation)
+    ) {
+      throw new AutomationError("source_changed_during_validation");
+    }
     if (options.execute && artifacts.changed) {
       verifyGitHubGates(config, worktreePath, artifacts);
       completeGitHubFlow(config, worktreePath, artifacts);
+      recordPhase(config, artifacts, "deployment_pending");
+      runDeploymentReadback(config, worktreePath, artifacts);
+      recordPhase(config, artifacts, "deployment_verified", {
+        deployment_readback: artifacts.deployment_readback,
+      });
+      recordPhase(config, artifacts, "main_sync_pending");
+      syncOriginalMain(config, artifacts);
+      recordPhase(config, artifacts, "main_sync_complete", {
+        main_sync: artifacts.main_sync,
+      });
+      cleanupRemoteBranch(config, worktreePath, artifacts);
+      recordPhase(config, artifacts, "remote_cleanup_complete", {
+        remote_branch_cleanup: artifacts.remote_branch_cleanup,
+      });
       primaryResult = result("verified", "merge_verified", artifacts);
     } else if (options.execute) {
       primaryResult = result("verified", "no_changes", artifacts);

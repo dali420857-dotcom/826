@@ -33,6 +33,8 @@ contracts:
   hermes_agent_preflight: scripts/Invoke-HermesResearchPreflight.ps1
   hermes_agent_role: .codex/agents/hermes-research-coordinator.toml
   web_clone_toolchain: config/web-clone-toolchain.yaml
+  negative_regression_gate: scripts/ci/negative-regression-gate.mjs
+  negative_decisions: config/negative-decisions.json
 
 graphs:
   system_context: graphs/system-context.mmd

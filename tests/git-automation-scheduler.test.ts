@@ -133,6 +133,10 @@ function createFleetInvocationFixture() {
           snapshotStabilityDelayMs: 0,
           lockStaleMinutes: 120,
           remoteCleanup: { enabled: false, ttlHours: 48 },
+          deployment: {
+            mode: "not_applicable",
+            reason: "scheduler fixture has no deployment target",
+          },
           github: {
             command: "gh",
             prefixArgs: [],

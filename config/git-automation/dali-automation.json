@@ -67,6 +67,10 @@
   "snapshotStabilityDelayMs": 3000,
   "lockStaleMinutes": 120,
   "remoteCleanup": { "enabled": true, "ttlHours": 48 },
+  "deployment": {
+    "mode": "not_applicable",
+    "reason": "This repository has no configured deployment target; merge is the delivery boundary."
+  },
   "gitIdentity": {
     "name": "github-actions[bot]",
     "email": "41898282+github-actions[bot]@users.noreply.github.com"
@@ -77,6 +81,10 @@
     "repository": "dali420857-dotcom/Dali-Automation",
     "qualityWorkflow": "quality.yml",
     "requiredChecks": ["quality / root"],
+    "review": {
+      "requiredApprovals": 1,
+      "requireNoUnresolvedFeedback": true
+    },
     "mergeMethod": "merge",
     "qualityRunPollAttempts": 60,
     "qualityRunPollIntervalMs": 2000,
