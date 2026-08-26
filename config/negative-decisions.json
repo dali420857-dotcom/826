@@ -1,0 +1,29 @@
+{
+  "schema_version": "negative-decision/v1",
+  "tombstone_allowlist": {
+    "files": [],
+    "symbols": [],
+    "routes": [],
+    "dependencies": []
+  },
+  "decisions": [
+    {
+      "id": "MAIL_Q01_FIXED_ONE_MESSAGE_SUPERSEDED_2026_08_23",
+      "status": "historical",
+      "source": "826-Emailautosave/to-questionnaire-mailspring-private-adapter.md",
+      "superseded_by": "826-Emailautosave/docs/adr/2026-08-23-mailspring-two-plugin-one-way-loop.md",
+      "decision": "The former fixed one-message first-round questionnaire answer is historical. The active contract uses the current runtime/database settings and server-owned ordered account/contact read model.",
+      "safety_boundary": "Provider approval, health, idempotency, receipt, mailbox reconciliation, and stop conditions remain required for real sends.",
+      "recorded_at": "2026-08-23"
+    },
+    {
+      "id": "MAIL_A_DB_B_ONE_WAY_OWNERSHIP_2026_08_23",
+      "status": "historical",
+      "source": "826-Emailautosave/docs/architecture/mailspring-one-way-loop.mmd",
+      "superseded_by": "826-Emailautosave/docs/adr/2026-08-23-mailspring-two-plugin-one-way-loop.md",
+      "decision": "A and B are Mailspring plugins; the external database is the only durable store. The forward loop is A journal to DB read model to B send to Mailspring event to A journal. No B-to-DB ACK edge is part of the contract.",
+      "safety_boundary": "A readiness/heartbeat loss revokes Mailspring connectivity and pauses B; unknown observations pause and reconcile without resend.",
+      "recorded_at": "2026-08-23"
+    }
+  ]
+}

@@ -10,6 +10,7 @@
     ".github",
     "config",
     "docs",
+    "package.json",
     "schemas",
     "scripts",
     "src",
@@ -21,6 +22,7 @@
     ".scratch",
     "826-Emailautosave",
     "826-Telegram",
+    "826-Wiza",
     "artifacts",
     "dali-outreach",
     "git-init-execution-preflight-20260818T163057Z.json",
@@ -39,8 +41,13 @@
     ".sqlite"
   ],
   "snapshotStabilityDelayMs": 3000,
+  "validationCwd": "source",
   "lockStaleMinutes": 120,
   "remoteCleanup": { "enabled": true, "ttlHours": 48 },
+  "deployment": {
+    "mode": "not_applicable",
+    "reason": "This repository has no configured deployment target; merge is the delivery boundary."
+  },
   "gitIdentity": {
     "name": "github-actions[bot]",
     "email": "41898282+github-actions[bot]@users.noreply.github.com"
@@ -51,6 +58,10 @@
     "repository": "dali420857-dotcom/826",
     "qualityWorkflow": "quality.yml",
     "requiredChecks": ["quality / root"],
+    "review": {
+      "requiredApprovals": 1,
+      "requireNoUnresolvedFeedback": true
+    },
     "mergeMethod": "merge",
     "qualityRunPollAttempts": 60,
     "qualityRunPollIntervalMs": 2000,

@@ -74,7 +74,7 @@ Windows 註冊器固定 absolute `pwsh`、Node、Git 與 GitHub CLI 路徑，並
 
 1. 使用 GitHub App installation token；若暫時使用 fine-grained PAT，權限只給目標 repository 所需的 contents、pull requests、actions 與 checks。
 2. 建立 PR 後，明確 dispatch `quality.yml` 到 automation branch，並保存回傳的 run ID。
-3. 只接受各 repository 設定中列出的 required checks 成功；826 parent repository 目前只要求穩定的 `quality / root`，已拆出的 Outreach 由獨立 child repository 自行驗證。
+3. 只接受 `quality / root` 與 `quality / outreach` 兩個 required checks 均成功。
 4. 呼叫 auto-merge 後輪詢 PR，直到 `MERGED`、明確失敗或 timeout；timeout 視為 `unknown`，先 reconciliation，不重複建立 PR 或 merge。
 5. 讀回 `mergedAt` 與 merge commit，再刪除精確的 automation branch。Repository 可另開啟 **Automatically delete head branches** 作第一層清理。
 

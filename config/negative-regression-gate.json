@@ -1,0 +1,11 @@
+{
+  "schema_version": "dali.device-cloud-control.negative-regression-gate/v1",
+  "mode": "advisory_until_authoritative_verifier",
+  "registry": "config/negative-decisions.json",
+  "verifier": {
+    "command_env": "NEGATIVE_REGRESSION_VERIFIER_COMMAND",
+    "protocol": "argv-json-v1",
+    "required_for_active_decisions": true,
+    "trusted_wrappers": []
+  }
+}

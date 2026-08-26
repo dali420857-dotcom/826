@@ -34,8 +34,11 @@ $requiredFiles = @(
     'config/storage.yaml',
     'config/knowledge-graph.yaml',
     'config/skill-registry.yaml',
+    'config/negative-decisions.json',
+    'config/negative-regression-gate.json',
     'scripts/Invoke-SkillPreflight.ps1',
     'scripts/Invoke-HermesResearchPreflight.ps1',
+    'scripts/ci/negative-regression-gate.mjs',
     '.agents/skills/ask-matt/SKILL.md',
     '.agents/skills/ask-matt/agents/openai.yaml',
     '.agents/skills/using-agent-skills/SKILL.md',
@@ -67,6 +70,28 @@ $requiredFiles = @(
 
 foreach ($file in $requiredFiles) { Require-File $file }
 
+$negativeGatePath = Join-Path $Root 'scripts/ci/negative-regression-gate.mjs'
+$negativeGateConfigPath = Join-Path $Root 'config/negative-regression-gate.json'
+$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+if ($null -eq $nodeCommand) {
+    Add-Failure 'Negative-regression gate is blocked: Node.js is not available.'
+} elseif ((Test-Path -LiteralPath $negativeGatePath -PathType Leaf) -and (Test-Path -LiteralPath $negativeGateConfigPath -PathType Leaf)) {
+    try {
+        $negativeGateOutput = & $nodeCommand.Source $negativeGatePath --config $negativeGateConfigPath --root $Root 2>&1
+        $negativeGateExit = $LASTEXITCODE
+        foreach ($line in $negativeGateOutput) { Write-Host "NEGATIVE-REGRESSION: $line" }
+        if ($negativeGateExit -eq 1) {
+            Add-Failure 'Negative-regression gate detected an active forbidden-regression violation.'
+        } elseif ($negativeGateExit -eq 2) {
+            Add-Failure 'Negative-regression gate is blocked or has an invalid registry/verifier contract.'
+        } elseif ($negativeGateExit -ne 0) {
+            Add-Failure "Negative-regression gate returned unsupported exit code: $negativeGateExit"
+        }
+    } catch {
+        Add-Failure "Negative-regression gate execution failed: $($_.Exception.Message)"
+    }
+}
+
 $baselinePath = Join-Path $Root 'config/project-baseline.yaml'
 $baseline = if (Test-Path -LiteralPath $baselinePath) { Get-Content -Raw -LiteralPath $baselinePath } else { '' }
 $requiredBaselineMarkers = @(
@@ -79,6 +104,8 @@ $requiredBaselineMarkers = @(
     'hermes_agent_preflight: scripts/Invoke-HermesResearchPreflight.ps1',
     'hermes_agent_role: .codex/agents/hermes-research-coordinator.toml',
     'web_clone_toolchain: config/web-clone-toolchain.yaml',
+    'negative_regression_gate: scripts/ci/negative-regression-gate.mjs',
+    'negative_decisions: config/negative-decisions.json',
     'required_readback: true'
 )
 foreach ($marker in $requiredBaselineMarkers) {
